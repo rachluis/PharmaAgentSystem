@@ -1,16 +1,6 @@
 # 后端项目初始化与数据库模型设计
 
-根据
-
-DataProcess.md 的 Task 2 要求，基于
-
-data_report.txt (1540 万行 CMS Open Payments 数据) 和
-
-analysis_assumptions.md (RFM 模型策略)，初始化后端项目并设计数据库模型。
-
 ## User Review Required
-
-IMPORTANT
 
  **核心字段选择** ：从 91 列中筛选出以下核心字段用于 RFM 分析。请确认是否遗漏关键字段或需要调整。
 
