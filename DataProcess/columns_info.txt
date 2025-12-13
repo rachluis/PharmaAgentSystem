@@ -1,0 +1,124 @@
+Reading file info from: E:\毕设\OP_DTL_GNRL_PGYR2024_P06302025_06162025.csv
+
+==================================================
+Total Columns: 91
+==================================================
+
+--- Column List ---
+0: Change_Type
+1: Covered_Recipient_Type
+2: Teaching_Hospital_CCN
+3: Teaching_Hospital_ID
+4: Teaching_Hospital_Name
+5: Covered_Recipient_Profile_ID
+6: Covered_Recipient_NPI
+7: Covered_Recipient_First_Name
+8: Covered_Recipient_Middle_Name
+9: Covered_Recipient_Last_Name
+10: Covered_Recipient_Name_Suffix
+11: Recipient_Primary_Business_Street_Address_Line1
+12: Recipient_Primary_Business_Street_Address_Line2
+13: Recipient_City
+14: Recipient_State
+15: Recipient_Zip_Code
+16: Recipient_Country
+17: Recipient_Province
+18: Recipient_Postal_Code
+19: Covered_Recipient_Primary_Type_1
+20: Covered_Recipient_Primary_Type_2
+21: Covered_Recipient_Primary_Type_3
+22: Covered_Recipient_Primary_Type_4
+23: Covered_Recipient_Primary_Type_5
+24: Covered_Recipient_Primary_Type_6
+25: Covered_Recipient_Specialty_1
+26: Covered_Recipient_Specialty_2
+27: Covered_Recipient_Specialty_3
+28: Covered_Recipient_Specialty_4
+29: Covered_Recipient_Specialty_5
+30: Covered_Recipient_Specialty_6
+31: Covered_Recipient_License_State_code1
+32: Covered_Recipient_License_State_code2
+33: Covered_Recipient_License_State_code3
+34: Covered_Recipient_License_State_code4
+35: Covered_Recipient_License_State_code5
+36: Submitting_Applicable_Manufacturer_or_Applicable_GPO_Name
+37: Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_ID
+38: Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_Name
+39: Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_State
+40: Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_Country
+41: Total_Amount_of_Payment_USDollars
+42: Date_of_Payment
+43: Number_of_Payments_Included_in_Total_Amount
+44: Form_of_Payment_or_Transfer_of_Value
+45: Nature_of_Payment_or_Transfer_of_Value
+46: City_of_Travel
+47: State_of_Travel
+48: Country_of_Travel
+49: Physician_Ownership_Indicator
+50: Third_Party_Payment_Recipient_Indicator
+51: Name_of_Third_Party_Entity_Receiving_Payment_or_Transfer_of_Value
+52: Charity_Indicator
+53: Third_Party_Equals_Covered_Recipient_Indicator
+54: Contextual_Information
+55: Delay_in_Publication_Indicator
+56: Record_ID
+57: Dispute_Status_for_Publication
+58: Related_Product_Indicator
+59: Covered_or_Noncovered_Indicator_1
+60: Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_1
+61: Product_Category_or_Therapeutic_Area_1
+62: Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_1
+63: Associated_Drug_or_Biological_NDC_1
+64: Associated_Device_or_Medical_Supply_PDI_1
+65: Covered_or_Noncovered_Indicator_2
+66: Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_2
+67: Product_Category_or_Therapeutic_Area_2
+68: Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_2
+69: Associated_Drug_or_Biological_NDC_2
+70: Associated_Device_or_Medical_Supply_PDI_2
+71: Covered_or_Noncovered_Indicator_3
+72: Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_3
+73: Product_Category_or_Therapeutic_Area_3
+74: Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_3
+75: Associated_Drug_or_Biological_NDC_3
+76: Associated_Device_or_Medical_Supply_PDI_3
+77: Covered_or_Noncovered_Indicator_4
+78: Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_4
+79: Product_Category_or_Therapeutic_Area_4
+80: Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_4
+81: Associated_Drug_or_Biological_NDC_4
+82: Associated_Device_or_Medical_Supply_PDI_4
+83: Covered_or_Noncovered_Indicator_5
+84: Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_5
+85: Product_Category_or_Therapeutic_Area_5
+86: Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_5
+87: Associated_Drug_or_Biological_NDC_5
+88: Associated_Device_or_Medical_Supply_PDI_5
+89: Program_Year
+90: Payment_Publication_Date
+
+==================================================
+--- First 5 Rows Sample ---
+  Change_Type  ... Payment_Publication_Date
+0         ADD  ...               06/30/2025
+1         ADD  ...               06/30/2025
+2         ADD  ...               06/30/2025
+3         ADD  ...               06/30/2025
+4         ADD  ...               06/30/2025
+
+[5 rows x 91 columns]
+==================================================
+
+--- Inferred Data Types (based on first 5 rows) ---
+Change_Type                                                  object
+Covered_Recipient_Type                                       object
+Teaching_Hospital_CCN                                         int64
+Teaching_Hospital_ID                                          int64
+Teaching_Hospital_Name                                       object
+                                                             ...   
+Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_5    float64
+Associated_Drug_or_Biological_NDC_5                         float64
+Associated_Device_or_Medical_Supply_PDI_5                   float64
+Program_Year                                                  int64
+Payment_Publication_Date                                     object
+Length: 91, dtype: object
