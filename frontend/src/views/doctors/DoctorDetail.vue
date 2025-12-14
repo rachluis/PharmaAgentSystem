@@ -88,7 +88,7 @@ const fetchDoctorDetail = async () => {
   loading.value = true
   try {
     const npi = route.params.npi as string
-    const res = await request.get(`/doctors/${npi}`)
+    const res: any = await request.get(`/doctors/${npi}`)
     doctor.value = res.doctor || res
     payments.value = res.recent_payments || []
   } catch (error) {

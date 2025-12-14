@@ -4,30 +4,42 @@
       <template #header>
         <div class="card-header">
           <span>医生列表</span>
-          <el-button type="primary" size="small">导出数据</el-button>
+          <el-button type="primary" size="small" @click="handleExport">
+            <el-icon><Download /></el-icon>
+            导出数据
+          </el-button>
         </div>
       </template>
       
       <!-- 筛选栏 -->
       <el-form :inline="true" :model="filterForm" class="filter-form">
         <el-form-item label="专业">
-          <el-select v-model="filterForm.specialty" placeholder="选择专业" clearable>
-            <el-option label="Cardiology" value="Cardiology" />
-            <el-option label="Oncology" value="Oncology" />
-            <el-option label="Neurology" value="Neurology" />
+          <el-select v-model="filterForm.specialty" placeholder="选择专业" clearable filterable>
+            <el-option
+              v-for="spec in specialtyOptions"
+              :key="spec"
+              :label="spec"
+              :value="spec"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="州">
           <el-select v-model="filterForm.state" placeholder="选择州" clearable>
-            <el-option label="CA" value="CA" />
-            <el-option label="NY" value="NY" />
-            <el-option label="TX" value="TX" />
+            <el-option
+              v-for="state in stateOptions"
+              :key="state"
+              :label="state"
+              :value="state"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="聚类">
           <el-select v-model="filterForm.clusterId" placeholder="选择聚类" clearable>
             <el-option label="Cluster 0 - 核心客户" :value="0" />
             <el-option label="Cluster 1 - 大众客户" :value="1" />
+            <el-option label="Cluster 2 - 潜力客户" :value="2" />
+            <el-option label="Cluster 3 - 普通客户" :value="3" />
+            <el-option label="Cluster 4 - 低价值客户" :value="4" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -83,11 +95,15 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { Download } from '@element-plus/icons-vue'
 import request from '@/api/request'
 
 const router = useRouter()
 const loading = ref(false)
 const tableData = ref([])
+const specialtyOptions = ref<string[]>([])
+const stateOptions = ref<string[]>([])
 
 const filterForm = reactive({
   specialty: '',
@@ -101,6 +117,20 @@ const pagination = reactive({
   total: 0
 })
 
+// 获取筛选器选项
+const fetchFilterOptions = async () => {
+  try {
+    const [specialtiesRes, statesRes]: any[] = await Promise.all([
+      request.get('/doctors/specialties'),
+      request.get('/doctors/states')
+    ])
+    specialtyOptions.value = specialtiesRes.specialties || []
+    stateOptions.value = statesRes.states || []
+  } catch (error) {
+    console.error('Failed to fetch filter options:', error)
+  }
+}
+
 // 获取医生列表
 const fetchDoctors = async () => {
   loading.value = true
@@ -113,7 +143,7 @@ const fetchDoctors = async () => {
     if (filterForm.state) params.state = filterForm.state
     if (filterForm.clusterId !== null) params.cluster_id = filterForm.clusterId
     
-    const res = await request.get('/doctors', { params })
+    const res: any = await request.get('/doctors', { params })
     tableData.value = res.items || []
     pagination.total = res.total || 0
   } catch (error) {
@@ -157,7 +187,45 @@ const getClusterTagType = (clusterId: number) => {
   return types[clusterId % types.length]
 }
 
+const handleExport = () => {
+  try {
+    // 准备CSV数据
+    const headers = ['NPI', '姓名', '专业', '州', '总金额', '频次', '分群']
+    const csvData = [headers.join(',')]
+    
+    tableData.value.forEach((row: any) => {
+      const rowData = [
+        row.npi || '',
+        `"${(row.first_name || '') + ' ' + (row.last_name || '')}"`,
+        `"${row.specialty || ''}"`,
+        row.state || '',
+        row.monetary || 0,
+        row.frequency || 0,
+        row.cluster_label || `Cluster ${row.cluster_id || 0}`
+      ]
+      csvData.push(rowData.join(','))
+    })
+    
+    // 创建Blob并下载
+    const blob = new Blob(['\ufeff' + csvData.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `doctors_${Date.now()}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    ElMessage.success('导出成功')
+  } catch (error) {
+    console.error('Export failed:', error)
+    ElMessage.error('导出失败')
+  }
+}
+
 onMounted(() => {
+  fetchFilterOptions()
   fetchDoctors()
 })
 </script>

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import engine, Base
 from .config import get_settings
+from . import models  # Import models to ensure tables are created
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -56,8 +57,9 @@ async def health_check():
     }
 
 
-from .routers import analysis, auth, doctors
+from .routers import analysis, auth, doctors, reports
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(doctors.router, prefix="/api/v1/doctors", tags=["doctors"])
+app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])

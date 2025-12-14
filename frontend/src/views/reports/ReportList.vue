@@ -109,7 +109,7 @@ const reportForm = reactive({
 const fetchReports = async () => {
   loading.value = true
   try {
-    const res = await request.get('/reports', {
+    const res: any = await request.get('/reports', {
       params: { page: pagination.page, page_size: 10 }
     })
     reports.value = res.items || []
@@ -128,7 +128,7 @@ const generateReport = () => {
 const submitGenerateReport = async () => {
   generating.value = true
   try {
-    const res = await request.post('/reports/generate', reportForm)
+    const res: any = await request.post('/reports/generate', reportForm)
     ElMessage.success('报告生成任务已创建')
     dialogVisible.value = false
     // Navigate to report detail for streaming view
