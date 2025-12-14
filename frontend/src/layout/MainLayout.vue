@@ -15,9 +15,17 @@
           <el-icon><Odometer /></el-icon>
           <span>Dashboard</span>
         </el-menu-item>
+        <el-menu-item index="/doctors">
+          <el-icon><User /></el-icon>
+          <span>医生管理</span>
+        </el-menu-item>
         <el-menu-item index="/analysis">
           <el-icon><DataLine /></el-icon>
-          <span>Analysis</span>
+          <span>聚类分析</span>
+        </el-menu-item>
+        <el-menu-item index="/reports">
+          <el-icon><Document /></el-icon>
+          <span>AI报告</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -35,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { Odometer, DataLine } from "@element-plus/icons-vue";
+import { Odometer, DataLine, User, Document } from "@element-plus/icons-vue";
 </script>
 
 <style scoped>

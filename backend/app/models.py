@@ -2,16 +2,38 @@
 SQLAlchemy ORM Models for Pharma Market Analysis System.
 
 Tables:
+- User: System users with authentication
 - Doctor: Aggregated doctor profiles with RFM values
 - PaymentRecord: Cleaned payment records from CMS Open Payments
 - ClusterResult: K-Means clustering results for AI strategy generation
 """
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Float, Date, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from .database import Base
+
+
+class User(Base):
+    """User table for authentication and authorization."""
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    email = Column(String(100), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(100), nullable=True)
+    role = Column(String(20), default="viewer")  # admin / analyst / viewer
+    avatar_url = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_login = Column(DateTime(timezone=True), nullable=True)
+    
+    def __repr__(self):
+        return f"<User(id={self.id}, username={self.username})>"
 
 
 class Doctor(Base):
