@@ -59,7 +59,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="关联聚类">
-          <el-select v-model="reportForm.cluster_id" placeholder="选择聚类结果">
+          <el-select v-model="reportForm.related_cluster_id" placeholder="选择聚类结果">
             <el-option label="最新聚类结果" :value="1" />
           </el-select>
         </el-form-item>
@@ -102,7 +102,7 @@ const pagination = reactive({
 
 const reportForm = reactive({
   report_type: 'cluster_analysis',
-  cluster_id: 1,
+  related_cluster_id: 1,
   custom_prompt: ''
 })
 
@@ -128,14 +128,27 @@ const generateReport = () => {
 const submitGenerateReport = async () => {
   generating.value = true
   try {
-    const res: any = await request.post('/reports/generate', reportForm)
+    // Construct payload matching AIReportCreate schema
+    const payload = {
+      report_title: `${getReportTypeName(reportForm.report_type)} - ${new Date().toLocaleString()}`,
+      report_type: reportForm.report_type,
+      related_cluster_id: reportForm.related_cluster_id,
+      // custom_prompt is not in schema yet, handling it logic-side or ignoring for now
+    }
+    
+    const res: any = await request.post('/reports/generate', payload)
     ElMessage.success('报告生成任务已创建')
     dialogVisible.value = false
+    
+    // Refresh list first
+    fetchReports()
+    
     // Navigate to report detail for streaming view
     if (res.report_id) {
       router.push(`/reports/${res.report_id}`)
     }
   } catch (error) {
+    console.error(error)
     ElMessage.error('生成报告失败')
   } finally {
     generating.value = false

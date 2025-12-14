@@ -152,7 +152,8 @@ class ClusterResult(Base):
     
     # Relationships
     doctors = relationship("Doctor", back_populates="cluster")
-    task = relationship("AnalysisTask", back_populates="result")
+    # Decoupled relationship to avoid circular dependency
+    task = relationship("AnalysisTask", foreign_keys=[task_id])
     
     def __repr__(self):
         return f"<ClusterResult(id={self.cluster_id}, name={self.cluster_name})>"
@@ -188,8 +189,9 @@ class AnalysisTask(Base):
     result_id = Column(Integer, ForeignKey("cluster_results.cluster_id"), nullable=True)
     
     # Relationships
-    creator = relationship("User", back_populates="analysis_tasks")
-    result = relationship("ClusterResult", back_populates="task")
+    creator = relationship("User", back_populates="analysis_tasks", foreign_keys=[created_by])
+    # Decoupled relationship
+    result = relationship("ClusterResult", foreign_keys=[result_id])
     
     def __repr__(self):
         return f"<AnalysisTask(id={self.task_id}, name={self.task_name}, status={self.status})>"
@@ -231,7 +233,7 @@ class AIReport(Base):
     # Relationships
     cluster = relationship("ClusterResult")
     doctor = relationship("Doctor")
-    creator = relationship("User", back_populates="ai_reports")
+    creator = relationship("User", back_populates="ai_reports", foreign_keys=[generated_by])
     
     def __repr__(self):
         return f"<AIReport(id={self.report_id}, title={self.report_title})>"
@@ -261,7 +263,7 @@ class SystemLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationship
-    user = relationship("User", back_populates="system_logs")
+    user = relationship("User", back_populates="system_logs", foreign_keys=[user_id])
     
     def __repr__(self):
         return f"<SystemLog(id={self.log_id}, action={self.action}, user_id={self.user_id})>"

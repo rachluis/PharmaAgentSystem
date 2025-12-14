@@ -49,32 +49,46 @@
       </el-form>
       
       <!-- 数据表格 -->
-      <el-table :data="tableData" stripe style="width: 100%" v-loading="loading">
-        <el-table-column prop="npi" label="NPI" width="120" />
-        <el-table-column prop="full_name" label="姓名" width="180" />
-        <el-table-column prop="specialty" label="专业" width="180" />
-        <el-table-column prop="state" label="州" width="80" />
-        <el-table-column prop="rfm_monetary" label="总金额 ($)" width="120">
-          <template #default="{ row }">
-            {{ formatMoney(row.rfm_monetary) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="rfm_frequency" label="频次" width="80" />
-        <el-table-column prop="cluster_label" label="分群" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getClusterTagType(row.cluster_id)">
-              {{ row.cluster_label || `Cluster ${row.cluster_id}` }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="{ row }">
-            <el-button type="primary" size="small" link @click="viewDetail(row.npi)">
-              查看详情
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="table-wrapper" style="height: 500px; overflow-y: auto;">
+        <el-table :data="tableData" stripe style="width: 100%" v-loading="loading">
+          <el-table-column prop="npi" label="NPI" width="120" />
+          <el-table-column label="姓名" width="180">
+            <template #default="{ row }">
+              {{ row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="specialty" label="专业" width="180">
+            <template #default="{ row }">
+              <span class="clickable" @click="applyFilter('specialty', row.specialty)">{{ row.specialty }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="state" label="州" width="80">
+            <template #default="{ row }">
+              <span class="clickable" @click="applyFilter('state', row.state)">{{ row.state }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="rfm_monetary" label="总金额 ($)" width="120">
+            <template #default="{ row }">
+              {{ formatMoney(row.rfm_monetary) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="rfm_frequency" label="频次" width="80" />
+          <el-table-column prop="cluster_label" label="分群" width="100">
+            <template #default="{ row }">
+              <el-tag :type="getClusterTagType(row.cluster_id)">
+                {{ row.cluster_label || `Cluster ${row.cluster_id}` }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120" fixed="right">
+            <template #default="{ row }">
+              <el-button type="primary" size="small" link @click="viewDetail(row.npi)">
+                查看详情
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
       
       <!-- 分页 -->
       <div class="pagination-container">
@@ -187,6 +201,16 @@ const getClusterTagType = (clusterId: number) => {
   return types[clusterId % types.length]
 }
 
+// Apply quick filter from table clicks
+const applyFilter = (field: string, value: string) => {
+  if (field === 'specialty') {
+    filterForm.specialty = value
+  } else if (field === 'state') {
+    filterForm.state = value
+  }
+  handleSearch()
+}
+
 const handleExport = () => {
   try {
     // 准备CSV数据
@@ -250,4 +274,10 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
 }
+
+.clickable {
+  cursor: pointer;
+  color: #409EFF;
+}
+
 </style>

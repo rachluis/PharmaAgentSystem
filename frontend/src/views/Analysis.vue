@@ -208,38 +208,59 @@ const runClustering = async () => {
   analyzing.value = true
   progress.value = 0
   
-  // Simulate progress
-  const progressInterval = setInterval(() => {
-    if (progress.value < 90) {
-      progress.value += 10
-    }
-  }, 500)
-  
   try {
-    const res: any = await request.post('/analysis/perform', {
-      k: clusterConfig.k,
-      features: clusterConfig.features
+    // 1. Create Task
+    const taskRes: any = await request.post('/analysis/tasks', {
+      task_name: `K-Means Analysis (K=${clusterConfig.k})`,
+      task_type: 'clustering',
+      parameters: {
+        k: clusterConfig.k,
+        features: clusterConfig.features
+      }
     })
     
-    progress.value = 100
-    clearInterval(progressInterval)
-    
-    if (res.clusters) {
-      results.value = res.clusters
-      selectedCluster.value = 0
-      ElMessage.success('聚类分析完成')
+    if (!taskRes || !taskRes.task_id) {
+      throw new Error('Failed to create task')
     }
+    
+    const taskId = taskRes.task_id
+    
+    // 2. Poll Status
+    const pollInterval = setInterval(async () => {
+      try {
+        const taskStatus: any = await request.get(`/analysis/tasks/${taskId}`)
+        
+        if (taskStatus) {
+          progress.value = taskStatus.progress || 0
+          
+          if (taskStatus.status === 'completed') {
+            clearInterval(pollInterval)
+            ElMessage.success('聚类分析完成')
+            analyzing.value = false
+            fetchExistingResults()
+          } else if (taskStatus.status === 'failed') {
+            clearInterval(pollInterval)
+            ElMessage.error(`分析失败: ${taskStatus.error_message || '未知错误'}`)
+            analyzing.value = false
+          }
+        }
+      } catch (e) {
+        console.error('Polling error', e)
+        // Don't stop polling immediately on intermittent network error, maybe count failures
+      }
+    }, 2000)
+    
   } catch (error) {
-    console.error('Clustering failed:', error)
-    clearInterval(progressInterval)
-  } finally {
+    console.error('Clustering init failed:', error)
+    ElMessage.error('无法启动分析任务')
     analyzing.value = false
   }
 }
 
 const fetchExistingResults = async () => {
   try {
-    const res: any = await request.get('/analysis/results')
+    // Use the new endpoint inside analysis_tasks router
+    const res: any = await request.get('/analysis/tasks/results/list')
     if (res && res.length) {
       results.value = res
       selectedCluster.value = 0

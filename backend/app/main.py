@@ -57,9 +57,9 @@ async def health_check():
     }
 
 
-from .routers import analysis, auth, doctors, reports
+from .routers import analysis_tasks, auth, doctors, reports
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(doctors.router, prefix="/api/v1/doctors", tags=["doctors"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
-app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
+app.include_router(analysis_tasks.router, prefix="/api/v1/analysis/tasks", tags=["analysis-tasks"])

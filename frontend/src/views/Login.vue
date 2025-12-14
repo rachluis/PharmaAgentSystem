@@ -100,7 +100,7 @@
       </div>
     </div>
 
-    <!-- 注册弹窗 (保持原有逻辑，优化样式) -->
+    <!-- 注册弹窗  -->
     <el-dialog 
       v-model="showRegister" 
       title="创建新账号" 

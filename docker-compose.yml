@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # 后端服务
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pharma-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app  # 开发时挂载代码
+      - ./backend/pharma.db:/app/pharma.db # 挂载数据库
+    environment:
+      - ALLOW_ORIGINS=http://localhost,http://localhost:80,http://127.0.0.1
+    restart: always
+
+  # 前端服务
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pharma-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always
+

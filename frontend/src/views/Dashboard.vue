@@ -264,7 +264,7 @@ onUnmounted(() => {
 }
 
 .chart-container {
-  height: 300px;
+  height: 350px;
 }
 
 .action-row {

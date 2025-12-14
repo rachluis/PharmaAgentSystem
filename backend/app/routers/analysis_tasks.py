@@ -117,3 +117,17 @@ async def delete_task(
     db.delete(task)
     db.commit()
     return {"message": "Task deleted successfully"}
+
+from ..models import ClusterResult
+from ..schemas import ClusterResultResponse
+
+@router.get("/results/list", response_model=List[ClusterResultResponse])
+async def get_clustering_results(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user) # Added auth
+):
+    """
+    Get existing clustering results.
+    """
+    results = db.query(ClusterResult).filter(ClusterResult.is_active == True).order_by(desc(ClusterResult.cluster_id)).all()
+    return results

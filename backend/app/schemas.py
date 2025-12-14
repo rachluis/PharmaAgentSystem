@@ -1,7 +1,7 @@
 """
 Pydantic schemas for API request/response validation.
 """
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
@@ -116,6 +116,11 @@ class ClusteringRequest(BaseModel):
     )
 
 
+
+class ClusteringResponse(BaseModel):
+    """Response after clustering is complete."""
+    success: bool
+    message: str
     clusters: List[ClusterResultResponse]
 
 
@@ -184,3 +189,8 @@ class SystemLogResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class AIReportList(BaseModel):
+    total: int
+    items: List[AIReportResponse]
