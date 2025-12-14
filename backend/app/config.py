@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     app_name: str = "医药市场画像与策略生成系统"
     debug: bool = True
     
+    # Security
+    secret_key: str = "pharma-agent-system-secret-key-change-in-production"
+    
     # Database
     database_url: str = "sqlite:///./pharma.db"
     
