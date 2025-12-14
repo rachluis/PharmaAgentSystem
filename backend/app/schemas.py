@@ -116,8 +116,71 @@ class ClusteringRequest(BaseModel):
     )
 
 
-class ClusteringResponse(BaseModel):
-    """Response after clustering is complete."""
-    success: bool
-    message: str
     clusters: List[ClusterResultResponse]
+
+
+# ============== Analysis Task Schemas ==============
+
+class AnalysisTaskBase(BaseModel):
+    task_name: str
+    task_type: str = "clustering"
+    parameters: Optional[Dict[str, Any]] = None
+
+class AnalysisTaskCreate(AnalysisTaskBase):
+    pass
+
+class AnalysisTaskResponse(AnalysisTaskBase):
+    task_id: int
+    status: str
+    progress: int
+    error_message: Optional[str] = None
+    created_by: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+    result_id: Optional[int] = None
+    
+    class Config:
+        from_attributes = True
+
+
+# ============== AI Report Schemas ==============
+
+class AIReportBase(BaseModel):
+    report_title: str
+    report_type: str
+    report_summary: Optional[str] = None
+    related_cluster_id: Optional[int] = None
+    related_npi: Optional[str] = None
+
+class AIReportCreate(AIReportBase):
+    report_content: Optional[str] = "" # Optional on create, filled by AI
+    dify_conversation_id: Optional[str] = None
+
+class AIReportResponse(AIReportBase):
+    report_id: int
+    report_content: str
+    generated_by: int
+    dify_conversation_id: Optional[str] = None
+    generation_time: Optional[float] = None
+    status: str
+    view_count: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+
+# ============== System Log Schemas ==============
+
+class SystemLogResponse(BaseModel):
+    log_id: int
+    user_id: Optional[int]
+    action: str
+    module: str
+    ip_address: Optional[str]
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True

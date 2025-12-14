@@ -1569,7 +1569,7 @@ vue
       <el-header>
         <Navbar @toggle-sidebar="toggleSidebar" />
       </el-header>
-    
+  
       <el-main>
         <router-view />
       </el-main>
@@ -1675,7 +1675,7 @@ const trendClass = computed(() =>
       display: flex;
       align-items: center;
       justify-content: center;
-    
+  
       .icon {
         font-size: 24px;
         color: white;
@@ -1700,11 +1700,11 @@ const trendClass = computed(() =>
       display: flex;
       align-items: center;
       gap: 4px;
-    
+  
       &.trend-up {
         color: $success-color;
       }
-    
+  
       &.trend-down {
         color: $danger-color;
       }
@@ -1849,8 +1849,8 @@ return`
 - [X] 后端骨架搭建
 - [X] 数据库设计与数据导入
 - [ ] JWT认证实现
-- [ ] 前端项目初始化
-- [ ] 基础路由与布局
+- [X] 前端项目初始化
+- [X] 基础路由与布局
 
 ### Phase 2: 核心功能（第3-4周）
 

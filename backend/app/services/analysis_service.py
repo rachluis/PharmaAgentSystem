@@ -5,240 +5,248 @@ import pandas as pd
 import numpy as np
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 import json
+from datetime import datetime
+import traceback
 
-from ..models import Doctor, ClusterResult
+from ..models import Doctor, ClusterResult, AnalysisTask
 from ..database import engine
 
 class AnalysisService:
     
-    def perform_clustering(self, db: Session, k: int = 5, features: list = None):
+    def perform_clustering(self, db: Session, task_id: int):
         """
-        Perform K-Means clustering on doctor data and update the database.
+        Execute K-Means clustering analysis workflow for a specific task.
         
         Args:
             db: Database session
-            k: Number of clusters
-            features: List of features to use (default: recency, frequency, monetary)
-        
+            task_id: ID of the AnalysisTask to execute
+            
         Returns:
-            dict: Summary of the clustering result
+            dict: Result summary
         """
-        if features is None:
-            features = ['recency_days', 'frequency', 'monetary']
+        task = db.query(AnalysisTask).filter(AnalysisTask.task_id == task_id).first()
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
             
-        # 1. Load Data
-        print("Loading data for clustering...")
-        query = db.query(Doctor.npi, Doctor.recency_days, Doctor.frequency, Doctor.monetary)
-        df = pd.read_sql(query.statement, db.bind)
-        
-        if df.empty:
-            raise ValueError("No doctor data found for clustering")
-            
-        # 2. Preprocessing
-        df_clean = df.copy().dropna()
-        
-        # Log transform for skewed features
-        # Note: We use log1p to handle zeros safely, though ETL should have handled this
-        if 'frequency' in features:
-            df_clean['frequency_log'] = np.log1p(df_clean['frequency'])
-        if 'monetary' in features:
-            df_clean['monetary_log'] = np.log1p(df_clean['monetary'])
-            
-        # Select features for scaling
-        # Map original names to transformed names for the model
-        model_features = []
-        for f in features:
-            if f == 'frequency':
-                model_features.append('frequency_log')
-            elif f == 'monetary':
-                model_features.append('monetary_log')
-            else:
-                model_features.append(f)
-                
-        # Scale data
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(df_clean[model_features])
-        
-        # 3. K-Means Clustering
-        print(f"Running K-Means with K={k}...")
-        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-        df_clean['cluster_id'] = kmeans.fit_predict(X_scaled)
-        
-        # 4. Save Results to Database
-        
-        # 4.1 Update Doctor table (Batch update)
-        # Verify if we can do bulk update efficiently
-        print("Updating Doctor records with cluster IDs...")
-        
-        # Prepare data for bulk update
-        # We need a list of dicts: [{'npi': '...', 'cluster_id': 0}, ...]
-        updates = df_clean[['npi', 'cluster_id']].to_dict('records')
-        
-        # Using SQLAlchemy Core for bulk update is faster for large datasets
-        # However, SQLite limit might be hit with 700k rows
-        # Let's use chunked updates
-        chunk_size = 10000
-        for i in range(0, len(updates), chunk_size):
-            chunk = updates[i:i + chunk_size]
-            db.bulk_update_mappings(Doctor, chunk)
+        try:
+            # 1. Update Task Status
+            task.status = "running"
+            task.started_at = datetime.now()
+            task.progress = 10
             db.commit()
             
-        # 4.2 Save Cluster Summaries to ClusterResult table
-        print("Calculating cluster summaries...")
-        
-        # Clear existing results
-        db.query(ClusterResult).delete()
-        
-        # Calculate summaries (use original values, not log-transformed)
-        summary = df_clean.groupby('cluster_id')[['recency_days', 'frequency', 'monetary']].agg(['mean', 'count'])
-        
-        # Calculate top specialties for each cluster
-        # This requires a separate query or joining with the original df since we dropped other columns from df
-        # Let's run a quick SQL query for this
-        
-        results = []
-        global_means = df_clean[['recency_days', 'frequency', 'monetary']].mean()
-        
-        for cluster_id in summary.index:
-            # Stats
-            r_mean = summary.loc[cluster_id, ('recency_days', 'mean')]
-            f_mean = summary.loc[cluster_id, ('frequency', 'mean')]
-            m_mean = summary.loc[cluster_id, ('monetary', 'mean')]
-            count = int(summary.loc[cluster_id, ('monetary', 'count')])
-            percentage = (count / len(df_clean)) * 100
+            # Parse parameters
+            params = json.loads(task.parameters) if task.parameters else {}
+            k = params.get('k', 5)
+            features = params.get('features', ['recency_days', 'frequency', 'monetary'])
             
-            # Automated Strategy Generation
-            strategy = self._generate_strategy(r_mean, f_mean, m_mean, global_means)
+            # 2. Load Data
+            task.progress = 20
+            db.commit()
+            print(f"Loading data for clustering task {task_id}...")
             
-            # Create Result Object
-            result_obj = ClusterResult(
-                cluster_id=int(cluster_id),
-                cluster_name=f"Cluster {cluster_id}", # Can be updated by AI later
-                size_count=count,
-                size_percentage=round(percentage, 2),
-                kpi_summary={
-                    "Avg_R_Days": round(r_mean, 1),
-                    "Avg_F_Count": round(f_mean, 1),
-                    "Avg_M_Amount": round(m_mean, 2)
-                },
-                strategy_focus=strategy,
-                context_for_llm=f"R={r_mean:.1f}, F={f_mean:.1f}, M=${m_mean:.2f}"
+            # Use explicit column selection for performance
+            # Note: We use existing RFM columns from Doctor table
+            query_cols = [Doctor.npi] + [getattr(Doctor, f) for f in features if hasattr(Doctor, f)]
+            query = db.query(*query_cols)
+            df = pd.read_sql(query.statement, db.bind)
+            
+            if df.empty:
+                raise ValueError("No doctor data available for clustering")
+                
+            # 3. Preprocessing
+            task.progress = 30
+            db.commit()
+            
+            df_clean = df.copy().dropna()
+            
+            # Log transform for skewed features (Frequency and Monetary are typically skewed)
+            model_features = []
+            for f in features:
+                if f in ['frequency', 'monetary', 'total_payments', 'avg_payment_amount']:
+                    col_name = f"{f}_log"
+                    df_clean[col_name] = np.log1p(df_clean[f])
+                    model_features.append(col_name)
+                else:
+                    model_features.append(f)
+            
+            # Standardization
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(df_clean[model_features])
+            
+            # 4. K-Means Clustering
+            task.progress = 50
+            db.commit()
+            print(f"Running K-Means with K={k}...")
+            
+            kmeans = KMeans(
+                n_clusters=k, 
+                random_state=42, 
+                n_init=10,
+                max_iter=300
             )
-            db.add(result_obj)
-            results.append(result_obj)
+            cluster_labels = kmeans.fit_predict(X_scaled)
+            df_clean['cluster_id'] = cluster_labels
             
-        db.commit()
-        print("Clustering complete.")
-        
-        return {
-            "k": k,
-            "total_doctors": len(df_clean),
-            "clusters": [r.kpi_summary for r in results]
-        }
-    
-    def _generate_strategy(self, r, f, m, global_means):
-        """Simple rule-based strategy generation."""
-        tags = []
-        if m > global_means['monetary'] * 1.5: tags.append("High Value")
-        elif m < global_means['monetary'] * 0.6: tags.append("Low Value")
-        
-        if f > global_means['frequency'] * 1.5: tags.append("High Frequency")
-        elif f < global_means['frequency'] * 0.6: tags.append("Low Frequency")
-        
-        if r < global_means['recency_days'] * 0.8: tags.append("Active")
-        elif r > global_means['recency_days'] * 1.2: tags.append("At Risk")
-        
-        if "High Value" in tags and "Active" in tags:
-            return "VIP Maintenance: Invite to exclusive events, prioritize personal visits."
-        elif "High Value" in tags and "At Risk" in tags:
-            return "Win-Back: Immediate intervention required, offer incentives."
-        elif "Low Value" in tags and "Active" in tags:
-            return "Growth Potential: Cross-sell new products to increase value."
-        else:
-             return "General Engagement: Standard digital outreach."
+            # 5. Calculate Metrics
+            task.progress = 70
+            db.commit()
+            
+            inertia = kmeans.inertia_
+            # Silhouette score is expensive for large datasets, sample if needed
+            if len(df_clean) > 10000:
+                # Calculate on a random sample for validation speed
+                indices = np.random.choice(len(X_scaled), 10000, replace=False)
+                silhouette = silhouette_score(X_scaled[indices], cluster_labels[indices])
+            else:
+                silhouette = silhouette_score(X_scaled, cluster_labels)
+                
+            # 6. Analyze Clusters and Auto-label
+            summary_stats, cluster_labels_map, strategies_map = self._analyze_clusters(
+                df_clean, k, features, global_means=df_clean[features].mean()
+            )
+            
+            # 7. Save Result
+            task.progress = 80
+            db.commit()
+            
+            # Create ClusterResult
+            result = ClusterResult(
+                cluster_name=f"{task.task_name} Result",
+                task_id=task.task_id,
+                algorithm="k-means",
+                features_used=json.dumps(features),
+                cluster_labels=json.dumps(cluster_labels_map),
+                silhouette_score=float(silhouette),
+                inertia=float(inertia),
+                kpi_summary=json.dumps(summary_stats), # JSON serializable
+                visualization_data=self._prepare_viz_data(df_clean, features, k),
+                is_active=True
+            )
+            db.add(result)
+            db.flush() # Get result_id
+            
+            # 8. Update Doctor Records (Batch)
+            task.progress = 90
+            db.commit()
+            print("Updating Doctor records...")
+            
+            self._batch_update_doctors(db, df_clean[['npi', 'cluster_id']])
+            
+            # 9. Complete Task
+            task.status = "completed"
+            task.progress = 100
+            task.completed_at = datetime.now()
+            task.result_id = result.cluster_id
+            
+            db.commit()
+            return {"task_id": task_id, "cluster_id": result.cluster_id, "status": "completed"}
+            
+        except Exception as e:
+            db.rollback()
+            print(f"Clustering Error: {str(e)}")
+            traceback.print_exc()
+            task.status = "failed"
+            task.error_message = str(e)
+            task.completed_at = datetime.now()
+            db.commit()
+            raise e
 
-    def generate_ai_strategies(self, db: Session):
-        """
-        Generate (Mock) AI strategies for all clusters.
-        """
-        print("Generating AI strategies for clusters...")
-        clusters = db.query(ClusterResult).all()
+    def _analyze_clusters(self, df, k, features, global_means):
+        """Analyze cluster characteristics and generate labels."""
+        stats = {}
+        labels_map = {}
+        strategies_map = {}
         
-        # Calculate global means for comparison context
-        # In a real app we might cache this or pass it in
-        # For now, we'll re-calculate or approximate
-        # Let's assume we can get it from the full dataset if needed
-        # Or simpler: just use the rules based on absolute values for the mock
+        # Calculate summary per cluster using original values (not log transformed)
+        grouped = df.groupby('cluster_id')[features].mean()
+        counts = df['cluster_id'].value_counts()
         
-        updated_count = 0
-        for cluster in clusters:
-            # Prepare context
-            summary = cluster.kpi_summary
-            r = summary.get("Avg_R_Days", 0)
-            f = summary.get("Avg_F_Count", 0)
-            m = summary.get("Avg_M_Amount", 0)
+        for i in range(k):
+            cluster_stat = grouped.loc[i].to_dict()
+            count = int(counts[i])
+            percentage = round((count / len(df)) * 100, 2)
             
-            # Generate Strategy (Mock)
-            strategy = self._mock_ai_generate(r, f, m)
+            stats[str(i)] = {
+                "count": count,
+                "percentage": percentage,
+                "means": {k: float(v) for k, v in cluster_stat.items()}
+            }
             
-            # Update Cluster
-            cluster.strategy_focus = strategy
-            updated_count += 1
+            # Heuristic Labeling
+            labels_map[str(i)] = self._generate_label(cluster_stat, global_means)
             
-        db.commit()
-        print(f"Updated strategies for {updated_count} clusters.")
-        return updated_count
+            # Simple Strategy Rule
+            strategies_map[str(i)] = self._generate_strategy_rule(cluster_stat, global_means)
+            
+        return stats, labels_map, strategies_map
 
-    def _mock_ai_generate(self, r, f, m):
-        """
-        Mock AI generation based on rules.
-        In production, this would call Dify API with a prompt.
-        """
-        # Simple logical segmentation
-        strategies = []
+    def _generate_label(self, cluster_means, global_means):
+        """Generate a short human-readable label for the cluster."""
+        # This assumes we have RFM features. Update logic if different features used.
+        m = cluster_means.get('monetary', 0)
+        f = cluster_means.get('frequency', 0)
+        gm = global_means.get('monetary', 1)
+        gf = global_means.get('frequency', 1)
         
-        # Value dimension
-        if m > 5000:
-            value_seg = "High Value (VIP)"
-            strategies.append("Inviting to exclusive national conferences.")
-            strategies.append("Providing premium academic support and latest trial data.")
-        elif m > 500:
-            value_seg = "Medium Value"
-            strategies.append("Regular product updates via digital channels.")
-            strategies.append("Regional seminar invitations.")
+        if m > gm * 2:
+            return "核心高价值 (VIP)"
+        elif m > gm * 1.2:
+            return "成长型客户"
+        elif f < gf * 0.5:
+            return "低活跃客户"
         else:
-            value_seg = "Low Value"
-            strategies.append("Automated email campaigns.")
-            strategies.append("General educational content distribution.")
-            
-        # Frequency dimension
-        if f > 20:
-            freq_seg = "High Frequency"
-            strategies.append("Maintaining relationship with frequent touchpoints.")
-        else:
-            freq_seg = "Low Frequency"
-            strategies.append("Identifying barriers to prescribing.")
-            strategies.append("Incentivizing trial usage.")
-            
-        # Recency dimension
-        if r < 60:
-            active_seg = "Active"
-        elif r < 180:
-            active_seg = "Lapsing"
-            strategies.append("Re-engagement campaign urgently needed.")
-        else:
-            active_seg = "Inactive"
-            strategies.append("Win-back program with special offers.")
-            
-        # Construct full strategy text
-        strategy_text = f"**Segment**: {value_seg} | {freq_seg} | {active_seg}\n\n**Recommended Actions**:\n"
-        for i, action in enumerate(strategies, 1):
-            strategy_text += f"{i}. {action}\n"
-            
-        return strategy_text
+            return "普通客户"
 
+    def _generate_strategy_rule(self, cluster_means, global_means):
+        """Generate simple rule-based strategy."""
+        label = self._generate_label(cluster_means, global_means)
+        if "VIP" in label:
+            return "重点维护：提供专属学术支持和会议邀请。"
+        elif "成长" in label:
+            return "潜力挖掘：增加拜访频率，介绍新产品。"
+        elif "低活跃" in label:
+            return "激活策略：调研未处方原因，尝试低门槛活动。"
+        else:
+            return "常规跟进：保持数字化触达。"
+
+    def _prepare_viz_data(self, df, features, k):
+        """Prepare simplified data for frontend charts (e.g. scatter plot)."""
+        # Sampling for visualization to keep JSON size manageable
+        sample_size = min(len(df), 2000)
+        sample = df.sample(n=sample_size, random_state=42)
+        
+        data = []
+        for _, row in sample.iterrows():
+            item = {"cluster": int(row['cluster_id'])}
+            for f in features:
+                item[f] = float(row[f])
+            data.append(item)
+            
+        return json.dumps(data)
+
+    def _batch_update_doctors(self, db: Session, updates_df):
+        """Update doctor cluster IDs in batches."""
+        # Convert to list of dicts for SQLAlchemy bulk update
+        updates = []
+        for _, row in updates_df.iterrows():
+            updates.append({
+                "npi": row['npi'],
+                "cluster_id": int(row['cluster_id'])
+            })
+            
+        chunk_size = 5000
+        for i in range(0, len(updates), chunk_size):
+            db.bulk_update_mappings(Doctor, updates[i:i + chunk_size])
+            db.commit()
+
+    def determine_optimal_k(self, db: Session, max_k: int = 10):
+        """Compute Inertia for K=1 to max_k to help find Elbow."""
+        # Logic similar to clustering but loop K and return inertia list
+        pass # To be implemented if creating a dedicated "suggest K" API endpoint
 
 analysis_service = AnalysisService()
