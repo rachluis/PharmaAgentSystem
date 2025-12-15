@@ -1,57 +1,89 @@
 <template>
   <el-container class="layout-container">
     <!-- Sidebar -->
-    <el-aside :width="isCollapsed ? '64px' : '220px'" class="sidebar">
+    <el-aside 
+      :width="themeStore.sidebarCollapsed ? '64px' : '240px'" 
+      class="sidebar"
+    >
       <!-- Logo -->
       <div class="logo">
-        <el-icon v-if="isCollapsed" :size="28" color="#409EFF"><Monitor /></el-icon>
-        <h2 v-else>Pharma Intel</h2>
+        <el-icon v-if="themeStore.sidebarCollapsed" :size="28" color="#409EFF">
+          <Monitor />
+        </el-icon>
+        <template v-else>
+          <el-icon :size="24" color="#409EFF"><Monitor /></el-icon>
+          <h2>Pharma Intel</h2>
+        </template>
       </div>
       
       <!-- Menu -->
-      <el-menu
-        router
-        :default-active="$route.path"
-        :collapse="isCollapsed"
-        :collapse-transition="false"
-        background-color="#001529"
-        text-color="rgba(255,255,255,0.65)"
-        active-text-color="#fff"
-        class="sidebar-menu"
-      >
-        <el-menu-item index="/dashboard">
-          <el-icon><Odometer /></el-icon>
-          <template #title>Dashboard</template>
-        </el-menu-item>
-        <el-menu-item index="/doctors">
-          <el-icon><User /></el-icon>
-          <template #title>医生管理</template>
-        </el-menu-item>
-        <el-menu-item index="/analysis">
-          <el-icon><DataLine /></el-icon>
-          <template #title>聚类分析</template>
-        </el-menu-item>
-        <el-menu-item index="/reports">
-          <el-icon><Document /></el-icon>
-          <template #title>AI报告</template>
-        </el-menu-item>
-      </el-menu>
+      <el-scrollbar class="sidebar-scrollbar">
+        <el-menu
+          router
+          :default-active="$route.path"
+          :collapse="themeStore.sidebarCollapsed"
+          :collapse-transition="false"
+          background-color="var(--sidebar)"
+          text-color="var(--sidebar-foreground)"
+          active-text-color="#409EFF"
+          class="sidebar-menu"
+        >
+          <el-menu-item index="/dashboard">
+            <el-icon><Odometer /></el-icon>
+            <template #title>Dashboard</template>
+          </el-menu-item>
+          
+          <el-menu-item index="/doctors">
+            <el-icon><User /></el-icon>
+            <template #title>医生管理</template>
+          </el-menu-item>
+          
+          <el-menu-item index="/analysis">
+            <el-icon><DataLine /></el-icon>
+            <template #title>聚类分析</template>
+          </el-menu-item>
+          
+          <el-menu-item index="/reports">
+            <el-icon><Document /></el-icon>
+            <template #title>AI报告</template>
+          </el-menu-item>
+          
+          <el-sub-menu index="data">
+            <template #title>
+              <el-icon><FolderOpened /></el-icon>
+              <span>数据管理</span>
+            </template>
+            <el-menu-item index="/data/import">数据导入</el-menu-item>
+            <el-menu-item index="/data/export">数据导出</el-menu-item>
+          </el-sub-menu>
+          
+          <el-sub-menu index="system">
+            <template #title>
+              <el-icon><Tools /></el-icon>
+              <span>系统工具</span>
+            </template>
+            <el-menu-item index="/system/logs">系统日志</el-menu-item>
+            <el-menu-item index="/system/users">用户管理</el-menu-item>
+          </el-sub-menu>
+        </el-menu>
+      </el-scrollbar>
       
       <!-- Bottom Actions -->
       <div class="sidebar-footer">
-        <el-tooltip content="设置" placement="right" :disabled="!isCollapsed">
+        <el-tooltip :content="themeStore.sidebarCollapsed ? '设置' : ''" placement="right">
           <div class="footer-item" @click="showSettings = true">
             <el-icon :size="18"><Setting /></el-icon>
-            <span v-if="!isCollapsed">设置</span>
+            <span v-if="!themeStore.sidebarCollapsed">设置</span>
           </div>
         </el-tooltip>
-        <el-tooltip :content="isCollapsed ? '展开' : '收起'" placement="right">
-          <div class="footer-item" @click="toggleCollapse">
+        
+        <el-tooltip :content="themeStore.sidebarCollapsed ? '展开' : '收起'" placement="right">
+          <div class="footer-item" @click="themeStore.toggleSidebar()">
             <el-icon :size="18">
-              <Fold v-if="!isCollapsed" />
+              <Fold v-if="!themeStore.sidebarCollapsed" />
               <Expand v-else />
             </el-icon>
-            <span v-if="!isCollapsed">收起</span>
+            <span v-if="!themeStore.sidebarCollapsed">收起</span>
           </div>
         </el-tooltip>
       </div>
@@ -67,13 +99,29 @@
             <el-breadcrumb-item>{{ currentPageName }}</el-breadcrumb-item>
           </el-breadcrumb>
         </div>
+        
         <div class="header-right">
-          <el-dropdown @command="handleCommand">
-            <span class="user-dropdown">
+          <!-- Theme Toggle -->
+          <el-tooltip :content="themeStore.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'">
+            <el-button 
+              circle 
+              @click="themeStore.toggleTheme()"
+              class="theme-toggle"
+            >
+              <el-icon>
+                <Sunny v-if="themeStore.theme === 'dark'" />
+                <Moon v-else />
+              </el-icon>
+            </el-button>
+          </el-tooltip>
+          
+          <!-- User Dropdown -->
+          <el-dropdown @command="handleCommand" trigger="click">
+            <div class="user-dropdown">
               <el-avatar :size="32" :src="userAvatar" />
               <span class="username">{{ username }}</span>
               <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </span>
+            </div>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="profile">
@@ -99,12 +147,11 @@
       <div class="settings-section">
         <h4>主题设置</h4>
         <div class="setting-item">
-          <span>主题色</span>
-          <el-color-picker v-model="themeColor" :predefine="predefineColors" />
-        </div>
-        <div class="setting-item">
           <span>深色模式</span>
-          <el-switch v-model="isDarkMode" />
+          <el-switch 
+            v-model="isDarkMode" 
+            @change="themeStore.toggleTheme()"
+          />
         </div>
       </div>
     </el-drawer>
@@ -116,24 +163,24 @@ import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { 
   Odometer, DataLine, User, Document, ArrowDown,
-  Setting, Fold, Expand, Monitor, SwitchButton 
+  Setting, Fold, Expand, Monitor, SwitchButton,
+  FolderOpened, Tools, Sunny, Moon
 } from "@element-plus/icons-vue"
 import { ElMessage } from 'element-plus'
+import { useThemeStore } from '@/stores/theme'
 
 const router = useRouter()
 const route = useRoute()
+const themeStore = useThemeStore()
 
-// Sidebar state
-const isCollapsed = ref(false)
+// Settings drawer
 const showSettings = ref(false)
 
-// Theme settings
-const themeColor = ref('#409EFF')
-const isDarkMode = ref(false)
-const predefineColors = [
-  '#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399',
-  '#1890ff', '#722ed1', '#13c2c2', '#eb2f96'
-]
+// Dark mode computed
+const isDarkMode = computed({
+  get: () => themeStore.theme === 'dark',
+  set: () => {} // Handled by switch @change
+})
 
 // User info
 const username = computed(() => {
@@ -154,15 +201,15 @@ const pageNames: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/doctors': '医生管理',
   '/analysis': '聚类分析',
-  '/reports': 'AI报告'
+  '/reports': 'AI报告',
+  '/data/import': '数据导入',
+  '/data/export': '数据导出',
+  '/system/logs': '系统日志',
+  '/system/users': '用户管理'
 }
 const currentPageName = computed(() => pageNames[route.path] || '页面')
 
 // Methods
-const toggleCollapse = () => {
-  isCollapsed.value = !isCollapsed.value
-}
-
 const handleCommand = (command: string) => {
   if (command === 'logout') {
     localStorage.removeItem('token')
@@ -177,17 +224,18 @@ const handleCommand = (command: string) => {
 
 <style scoped>
 .layout-container {
-  height: 100vh;
+  height: 100svh;
   overflow: hidden;
 }
 
 /* Sidebar */
 .sidebar {
-  background-color: #001529;
+  background-color: var(--sidebar);
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
   overflow: hidden;
+  border-right: 1px solid var(--sidebar-border);
 }
 
 .logo {
@@ -195,43 +243,52 @@ const handleCommand = (command: string) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #002140;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  gap: 12px;
+  background-color: var(--sidebar-accent);
+  border-bottom: 1px solid var(--sidebar-border);
+  padding: 0 20px;
 }
+
 .logo h2 {
   margin: 0;
   font-size: 18px;
-  color: #fff;
+  color: var(--sidebar-foreground);
   font-weight: 600;
   white-space: nowrap;
 }
 
-.sidebar-menu {
+.sidebar-scrollbar {
   flex: 1;
-  border-right: none;
-  overflow-y: auto;
+  height: 0;
 }
+
+.sidebar-menu {
+  border-right: none;
+}
+
 .sidebar-menu:not(.el-menu--collapse) {
-  width: 220px;
+  width: 240px;
 }
 
 /* Sidebar Footer */
 .sidebar-footer {
-  border-top: 1px solid rgba(255,255,255,0.1);
+  border-top: 1px solid var(--sidebar-border);
   padding: 8px 0;
 }
+
 .footer-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px 20px;
-  color: rgba(255,255,255,0.65);
+  color: var(--sidebar-muted);
   cursor: pointer;
   transition: all 0.2s;
 }
+
 .footer-item:hover {
-  color: #fff;
-  background-color: rgba(255,255,255,0.05);
+  color: var(--sidebar-foreground);
+  background-color: var(--sidebar-accent);
 }
 
 /* Main Container */
@@ -239,59 +296,79 @@ const handleCommand = (command: string) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background-color: var(--background);
 }
 
 /* Header */
 .header {
-  background-color: #fff;
-  border-bottom: 1px solid #e8e8e8;
+  background-color: var(--card);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  box-shadow: var(--shadow-sm);
 }
+
 .header-left {
   display: flex;
   align-items: center;
 }
+
 .header-right {
   display: flex;
   align-items: center;
+  gap: 12px;
 }
+
+.theme-toggle {
+  border: 1px solid var(--border);
+  background-color: var(--card);
+}
+
 .user-dropdown {
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  transition: background-color 0.2s;
 }
+
+.user-dropdown:hover {
+  background-color: var(--accent);
+}
+
 .username {
   font-size: 14px;
-  color: #333;
+  color: var(--foreground);
 }
 
 /* Main Content */
 .main-content {
-  background-color: #f0f2f5;
+  background-color: var(--background);
   padding: 20px;
   overflow-y: auto;
-  height: calc(100vh - 60px);
+  height: calc(100svh - 60px);
 }
 
 /* Settings Drawer */
 .settings-section {
   padding: 0 16px;
 }
+
 .settings-section h4 {
   margin: 16px 0 12px;
   font-size: 14px;
-  color: #666;
+  color: var(--muted-foreground);
 }
+
 .setting-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 12px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border);
 }
 </style>
