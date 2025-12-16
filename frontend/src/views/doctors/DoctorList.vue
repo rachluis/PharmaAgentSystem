@@ -4,10 +4,16 @@
       <template #header>
         <div class="card-header">
           <span>医生列表</span>
-          <el-button type="primary" size="small" @click="handleExport">
-            <el-icon><Download /></el-icon>
-            导出数据
-          </el-button>
+          <div class="header-actions">
+            <el-button type="success" size="small" @click="openDialog('create')">
+              <el-icon><Plus /></el-icon>
+              新增医生
+            </el-button>
+            <el-button type="primary" size="small" @click="handleExport">
+              <el-icon><Download /></el-icon>
+              导出数据
+            </el-button>
+          </div>
         </div>
       </template>
       
@@ -49,15 +55,21 @@
       </el-form>
       
       <!-- 数据表格 -->
-      <div class="table-wrapper" style="height: 500px; overflow-y: auto;">
-        <el-table :data="tableData" stripe style="width: 100%" v-loading="loading">
+      <div class="card-content">
+        <div class="table-wrapper">
+          <el-table
+            :data="tableData"
+            stripe
+            style="width: 100%; height: 100%"
+            v-loading="loading"
+          >
           <el-table-column prop="npi" label="NPI" width="120" />
           <el-table-column label="姓名" width="180">
             <template #default="{ row }">
               {{ row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() }}
             </template>
           </el-table-column>
-          <el-table-column prop="specialty" label="专业" width="180">
+          <el-table-column prop="specialty" label="专业" width="480">
             <template #default="{ row }">
               <span class="clickable" @click="applyFilter('specialty', row.specialty)">{{ row.specialty }}</span>
             </template>
@@ -72,7 +84,7 @@
               {{ formatMoney(row.rfm_monetary) }}
             </template>
           </el-table-column>
-          <el-table-column prop="rfm_frequency" label="频次" width="80" />
+          <el-table-column prop="rfm_frequency" label="频次" width="120" />
           <el-table-column prop="cluster_label" label="分群" width="100">
             <template #default="{ row }">
               <el-tag :type="getClusterTagType(row.cluster_id)">
@@ -80,38 +92,77 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
+          <el-table-column label="操作" width="220" fixed="right">
             <template #default="{ row }">
               <el-button type="primary" size="small" link @click="viewDetail(row.npi)">
-                查看详情
+                查看
+              </el-button>
+              <el-button type="warning" size="small" link @click="openDialog('edit', row)">
+                <el-icon><Edit /></el-icon> 编辑
+              </el-button>
+              <el-button type="danger" size="small" link @click="handleDelete(row)">
+                <el-icon><Delete /></el-icon> 删除
               </el-button>
             </template>
           </el-table-column>
         </el-table>
       </div>
-      
-      <!-- 分页 -->
-      <div class="pagination-container">
-        <el-pagination
-          v-model:current-page="pagination.page"
-          v-model:page-size="pagination.pageSize"
-          :total="pagination.total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSizeChange"
-          @current-change="handlePageChange"
-        />
-      </div>
-    </el-card>
+    </div>
+
+    <!-- 分页 -->
+    <div class="pagination-container">
+      <el-pagination
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.pageSize"
+        :total="pagination.total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="handleSizeChange"
+        @current-change="handlePageChange"
+      />
+    </div>
+  </el-card>
+
+    <!-- Create/Edit Dialog -->
+    <el-dialog :title="dialogTitle" v-model="dialogVisible" width="500px">
+      <el-form :model="doctorForm" :rules="doctorRules" ref="doctorFormRef" label-width="100px">
+        <el-form-item label="NPI" prop="npi">
+          <el-input v-model="doctorForm.npi" :disabled="dialogType === 'edit'" placeholder="10-digit NPI" />
+        </el-form-item>
+        <el-form-item label="First Name" prop="first_name">
+          <el-input v-model="doctorForm.first_name" placeholder="First Name" />
+        </el-form-item>
+        <el-form-item label="Last Name" prop="last_name">
+          <el-input v-model="doctorForm.last_name" placeholder="Last Name" />
+        </el-form-item>
+        <el-form-item label="Specialty" prop="specialty">
+          <el-select v-model="doctorForm.specialty" placeholder="Select Specialty" filterable allow-create style="width: 100%">
+            <el-option v-for="spec in specialtyOptions" :key="spec" :label="spec" :value="spec" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="State" prop="state">
+          <el-select v-model="doctorForm.state" placeholder="Select State" filterable style="width: 100%">
+            <el-option v-for="state in stateOptions" :key="state" :label="state" :value="state" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitDoctorForm">确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Download } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Download, Plus, Edit, Delete } from '@element-plus/icons-vue'
 import request from '@/api/request'
+import { createDoctor, updateDoctor, deleteDoctor, type DoctorForm } from '@/api/doctors'
 
 const router = useRouter()
 const loading = ref(false)
@@ -211,6 +262,101 @@ const applyFilter = (field: string, value: string) => {
   handleSearch()
 }
 
+// CRUD Logic
+const dialogVisible = ref(false)
+const dialogType = ref<'create' | 'edit'>('create')
+const doctorFormRef = ref()
+
+const doctorForm = reactive<DoctorForm>({
+  npi: '',
+  first_name: '',
+  last_name: '',
+  specialty: '',
+  state: ''
+})
+
+const doctorRules = {
+  npi: [{ required: true, message: 'Please input NPI', trigger: 'blur' }, { len: 10, message: 'NPI must be 10 digits', trigger: 'blur' }],
+  first_name: [{ required: true, message: 'Please input First Name', trigger: 'blur' }],
+  last_name: [{ required: true, message: 'Please input Last Name', trigger: 'blur' }]
+}
+
+const dialogTitle = computed(() => dialogType.value === 'create' ? '新增医生' : '编辑医生')
+
+const openDialog = (type: 'create' | 'edit', row?: any) => {
+  dialogType.value = type
+  dialogVisible.value = true
+  
+  if (type === 'create') {
+    doctorForm.npi = ''
+    doctorForm.first_name = ''
+    doctorForm.last_name = ''
+    doctorForm.specialty = ''
+    doctorForm.state = ''
+  } else if (row) {
+    doctorForm.npi = row.npi
+    doctorForm.first_name = row.first_name || ''
+    doctorForm.last_name = row.last_name || ''
+    doctorForm.specialty = row.specialty
+    doctorForm.state = row.state
+    
+    // Split full name if individual names missing
+    if (!doctorForm.first_name && row.full_name) {
+      const parts = row.full_name.split(' ')
+      doctorForm.first_name = parts[0]
+      doctorForm.last_name = parts.slice(1).join(' ')
+    }
+  }
+  
+  // Clear validation after open
+  setTimeout(() => {
+    doctorFormRef.value?.clearValidate()
+  }, 0)
+}
+
+const submitDoctorForm = async () => {
+  if (!doctorFormRef.value) return
+  
+  await doctorFormRef.value.validate(async (valid: boolean) => {
+    if (valid) {
+      try {
+        if (dialogType.value === 'create') {
+          await createDoctor(doctorForm)
+          ElMessage.success('医生创建成功')
+        } else {
+          await updateDoctor(doctorForm.npi, doctorForm)
+          ElMessage.success('医生信息更新成功')
+        }
+        dialogVisible.value = false
+        fetchDoctors() // Refresh list
+      } catch (error: any) {
+        // Error handled by request interceptor usually, but safe to log
+        console.error(error)
+      }
+    }
+  })
+}
+
+const handleDelete = async (row: any) => {
+  ElMessageBox.confirm(
+    `确定要删除医生 ${row.full_name || row.npi} 吗? 此操作不可恢复。`,
+    '警告',
+    {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  ).then(async () => {
+    try {
+      await deleteDoctor(row.npi)
+      ElMessage.success('医生已删除')
+      fetchDoctors()
+    } catch (error) {
+      console.error(error)
+    }
+  })
+}
+
 const handleExport = () => {
   try {
     // 准备CSV数据
@@ -256,28 +402,78 @@ onMounted(() => {
 
 <style scoped>
 .doctor-list-container {
+  height: 100%;
   padding: 0;
+  display: flex;
+  flex-direction: column;
 }
 
+/* Make card fill height */
+:deep(.el-card) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+}
+
+:deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  overflow: hidden; /* Prevent body scroll */
+}
+
+/* Card Header */
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  font-weight: 600;
+  color: var(--foreground);
 }
 
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* Filter Form */
 .filter-form {
   margin-bottom: 20px;
+  flex-shrink: 0; /* Keep form visible */
 }
 
+/* Content Wrapper */
+.card-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Table Wrapper */
+.table-wrapper {
+  flex: 1;
+  overflow: hidden; /* Let el-table handle scroll */
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+/* Pagination */
 .pagination-container {
-  margin-top: 20px;
+  flex-shrink: 0;
+  margin-top: 15px;
   display: flex;
   justify-content: flex-end;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 .clickable {
   cursor: pointer;
-  color: #409EFF;
+  color: var(--primary);
 }
-
 </style>

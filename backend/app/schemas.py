@@ -23,6 +23,15 @@ class DoctorCreate(DoctorBase):
     pass
 
 
+class DoctorUpdate(BaseModel):
+    """Schema for updating doctor details (NPI excluded)."""
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    primary_type: Optional[str] = None
+    specialty: Optional[str] = None
+    state: Optional[str] = None
+
+
 class DoctorRFM(BaseModel):
     """RFM values for a doctor."""
     recency_days: Optional[int] = Field(None, description="最近支付距今天数")

@@ -2,7 +2,7 @@
 Doctors API Router.
 Handles doctor data queries, statistics, and details.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional, List
@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..database import get_db
 from ..models import Doctor, PaymentRecord
 from ..core.security import get_current_user
-from ..schemas import DoctorResponse, DoctorList, PaymentRecordResponse
+from ..schemas import DoctorResponse, DoctorList, PaymentRecordResponse, DoctorCreate, DoctorUpdate
 
 router = APIRouter()
 
@@ -33,6 +33,81 @@ class DoctorDetailResponse(BaseModel):
 
 
 # ============== Endpoints ==============
+
+@router.post("", response_model=DoctorResponse, status_code=status.HTTP_201_CREATED)
+async def create_doctor(doctor: DoctorCreate, db: Session = Depends(get_db)):
+    """Create a new doctor profile."""
+    # Check if NPI exists
+    existing_doctor = db.query(Doctor).filter(Doctor.npi == doctor.npi).first()
+    if existing_doctor:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail=f"Doctor with NPI {doctor.npi} already exists."
+        )
+    
+    # Create new doctor
+    new_doctor = Doctor(
+        npi=doctor.npi,
+        first_name=doctor.first_name,
+        last_name=doctor.last_name,
+        full_name=f"{doctor.first_name} {doctor.last_name}".strip(),
+        specialty=doctor.specialty,
+        state=doctor.state,
+        city=None, # Not in schema yet
+        primary_type=doctor.primary_type,
+        # Default stats
+        monetary=0.0,
+        frequency=0,
+        recency_days=None
+    )
+    
+    db.add(new_doctor)
+    db.commit()
+    db.refresh(new_doctor)
+    return new_doctor
+
+
+@router.put("/{npi}", response_model=DoctorResponse)
+async def update_doctor(npi: str, doctor_update: DoctorUpdate, db: Session = Depends(get_db)):
+    """Update doctor details."""
+    doctor = db.query(Doctor).filter(Doctor.npi == npi).first()
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    
+    # Update fields if provided
+    if doctor_update.first_name is not None:
+        doctor.first_name = doctor_update.first_name
+    if doctor_update.last_name is not None:
+        doctor.last_name = doctor_update.last_name
+    
+    # Re-compute full name if names changed
+    if doctor_update.first_name is not None or doctor_update.last_name is not None:
+        doctor.full_name = f"{doctor.first_name} {doctor.last_name}".strip()
+
+    if doctor_update.specialty is not None:
+        doctor.specialty = doctor_update.specialty
+    if doctor_update.state is not None:
+        doctor.state = doctor_update.state
+    if doctor_update.primary_type is not None:
+        doctor.primary_type = doctor_update.primary_type
+        
+    db.commit()
+    db.refresh(doctor)
+    return doctor
+
+
+@router.delete("/{npi}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_doctor(npi: str, db: Session = Depends(get_db)):
+    """Delete a doctor profile."""
+    doctor = db.query(Doctor).filter(Doctor.npi == npi).first()
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    
+    # Optional: Check for related records logic or cascade delete
+    # For now, we rely on DB cascade or allow deletion
+    db.delete(doctor)
+    db.commit()
+    return None
 
 @router.get("", response_model=DoctorList)
 async def get_doctors(
