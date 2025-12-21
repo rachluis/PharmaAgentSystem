@@ -48,22 +48,13 @@
             <template #title>AI报告</template>
           </el-menu-item>
           
-          <el-sub-menu index="data">
-            <template #title>
-              <el-icon><FolderOpened /></el-icon>
-              <span>数据管理</span>
-            </template>
-            <el-menu-item index="/data/import">数据导入</el-menu-item>
-            <el-menu-item index="/data/export">数据导出</el-menu-item>
-          </el-sub-menu>
-          
           <el-sub-menu index="system">
             <template #title>
               <el-icon><Tools /></el-icon>
               <span>系统工具</span>
             </template>
             <el-menu-item index="/system/logs">系统日志</el-menu-item>
-            <el-menu-item index="/system/users">用户管理</el-menu-item>
+            <el-menu-item index="/settings">用户管理</el-menu-item>
           </el-sub-menu>
         </el-menu>
       </el-scrollbar>
@@ -127,6 +118,9 @@
                 <el-dropdown-item command="profile">
                   <el-icon><User /></el-icon> 个人信息
                 </el-dropdown-item>
+                <el-dropdown-item command="change-password">
+                  <el-icon><Lock /></el-icon> 修改密码
+                </el-dropdown-item>
                 <el-dropdown-item divided command="logout">
                   <el-icon><SwitchButton /></el-icon> 退出登录
                 </el-dropdown-item>
@@ -164,14 +158,17 @@ import { useRouter, useRoute } from 'vue-router'
 import { 
   Odometer, DataLine, User, Document, ArrowDown,
   Setting, Fold, Expand, Monitor, SwitchButton,
-  FolderOpened, Tools, Sunny, Moon
+  FolderOpened, Tools, Sunny, Moon, Lock
 } from "@element-plus/icons-vue"
 import { ElMessage } from 'element-plus'
 import { useThemeStore } from '@/stores/theme'
+import { useUserStore } from '@/stores/user'
+import request from '@/api/request'
 
 const router = useRouter()
 const route = useRoute()
 const themeStore = useThemeStore()
+const userStore = useUserStore()
 
 // Settings drawer
 const showSettings = ref(false)
@@ -183,18 +180,8 @@ const isDarkMode = computed({
 })
 
 // User info
-const username = computed(() => {
-  const user = localStorage.getItem('user')
-  if (user) {
-    try {
-      return JSON.parse(user).username || 'Admin'
-    } catch {
-      return 'Admin'
-    }
-  }
-  return 'Admin'
-})
-const userAvatar = 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'
+const username = computed(() => userStore.user?.full_name || userStore.user?.username || 'Admin')
+const userAvatar = computed(() => userStore.user?.avatar_url || 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png')
 
 // Current page name
 const pageNames: Record<string, string> = {
@@ -202,6 +189,7 @@ const pageNames: Record<string, string> = {
   '/doctors': '医生管理',
   '/analysis': '聚类分析',
   '/reports': 'AI报告',
+  '/settings': '个人设置',
   '/data/import': '数据导入',
   '/data/export': '数据导出',
   '/system/logs': '系统日志',
@@ -212,12 +200,15 @@ const currentPageName = computed(() => pageNames[route.path] || '页面')
 // Methods
 const handleCommand = (command: string) => {
   if (command === 'logout') {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-    ElMessage.success('已退出登录')
-    router.push('/login')
+    request.post('/auth/logout').finally(() => {
+        userStore.clearUser()
+        ElMessage.success('已退出登录')
+        router.push('/login')
+    })
   } else if (command === 'profile') {
-    ElMessage.info('功能开发中')
+    router.push('/settings?tab=profile')
+  } else if (command === 'change-password') {
+    router.push('/settings?tab=security')
   }
 }
 </script>

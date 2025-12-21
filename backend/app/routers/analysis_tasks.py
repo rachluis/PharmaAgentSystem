@@ -5,7 +5,7 @@ from typing import Optional, List
 import json
 
 from ..database import get_db
-from ..models import AnalysisTask, User, SystemLog
+from ..models import AnalysisTask, User
 from ..schemas import AnalysisTaskCreate, AnalysisTaskResponse
 from ..core.security import get_current_active_user
 from ..services.analysis_service import analysis_service
@@ -46,15 +46,7 @@ async def create_analysis_task(
             db_task.task_id
         )
     
-    # 3. Log Action
-    log = SystemLog(
-        user_id=current_user.id,
-        action="create_task",
-        module="analysis",
-        request_data=json.dumps(task_in.model_dump())
-    )
-    db.add(log)
-    db.commit()
+    # Note: Operation logging is now handled by middleware
     
     return db_task
 

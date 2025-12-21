@@ -115,20 +115,26 @@
     >
       <el-form :model="registerForm" :rules="registerRules" ref="registerFormRef" label-position="top">
         <el-form-item label="用户名" prop="username">
-          <el-input v-model="registerForm.username" prefix-icon="User" placeholder="3-20个字符，字母/数字/下划线"/>
+          <el-input v-model="registerForm.username" :prefix-icon="User" placeholder="3-20个字符，字母/数字/下划线"/>
         </el-form-item>
         <el-form-item label="电子邮箱" prop="email">
-          <el-input v-model="registerForm.email" prefix-icon="Message" placeholder="用于找回密码"/>
+          <el-input v-model="registerForm.email" :prefix-icon="Message" placeholder="用于找回密码"/>
         </el-form-item>
         <el-form-item label="真实姓名" prop="full_name">
-          <el-input v-model="registerForm.full_name" prefix-icon="Postcard" placeholder="选填"/>
+          <el-input v-model="registerForm.full_name" :prefix-icon="Postcard" placeholder="选填"/>
+        </el-form-item>
+        <el-form-item label="手机号码" prop="phone">
+          <el-input v-model="registerForm.phone" :prefix-icon="Iphone" placeholder="选填"/>
+        </el-form-item>
+        <el-form-item label="个人简介" prop="bio">
+          <el-input v-model="registerForm.bio" type="textarea" placeholder="选填，介绍下自己"/>
         </el-form-item>
         <el-form-item label="密码" prop="password">
-          <el-input v-model="registerForm.password" type="password" show-password prefix-icon="Lock" placeholder="至少6位"/>
+          <el-input v-model="registerForm.password" type="password" show-password :prefix-icon="Lock" placeholder="至少6位"/>
           <PasswordStrength :password="registerForm.password" :show-details="true" />
         </el-form-item>
         <el-form-item label="确认密码" prop="confirmPassword">
-          <el-input v-model="registerForm.confirmPassword" type="password" show-password prefix-icon="Lock" placeholder="再次输入密码"/>
+          <el-input v-model="registerForm.confirmPassword" type="password" show-password :prefix-icon="Lock" placeholder="再次输入密码"/>
         </el-form-item>
         
         <el-form-item prop="agreement">
@@ -197,13 +203,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { 
   User, Lock, DataAnalysis, Monitor, 
-  TrendCharts, Cpu, ArrowRight, Message, Postcard
+  TrendCharts, Cpu, ArrowRight, Message, Postcard, Iphone
 } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import PasswordStrength from '@/components/PasswordStrength.vue'
@@ -247,6 +253,8 @@ const registerForm = reactive({
   username: '',
   email: '',
   full_name: '',
+  phone: '',
+  bio: '',
   password: '',
   confirmPassword: '',
   agreement: false
@@ -384,6 +392,8 @@ const handleRegister = async () => {
       username: registerForm.username,
       email: registerForm.email,
       full_name: registerForm.full_name,
+      phone: registerForm.phone,
+      bio: registerForm.bio,
       password: registerForm.password
     })
     ElMessage.success('注册成功，请使用新账号登录')

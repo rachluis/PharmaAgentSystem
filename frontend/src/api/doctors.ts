@@ -40,12 +40,16 @@ export interface DoctorUpdate {
 export interface DoctorQueryParams {
     page?: number
     page_size?: number
-    specialty?: string
-    state?: string
+    specialty?: string[]
+    state?: string[]
     search?: string
     cluster_id?: number
     min_monetary?: number
     max_monetary?: number
+    min_frequency?: number
+    max_frequency?: number
+    min_recency?: number
+    max_recency?: number
 }
 
 export interface StatisticsResponse {
@@ -62,7 +66,21 @@ export const getDoctors = (params: DoctorQueryParams) => {
     return request<any, DoctorListResponse>({
         url: '/doctors',
         method: 'get',
-        params
+        params,
+        paramsSerializer: {
+            serialize: (params) => {
+                const searchParams = new URLSearchParams();
+                for (const [key, value] of Object.entries(params)) {
+                    if (value === undefined || value === null || value === '') continue;
+                    if (Array.isArray(value)) {
+                        value.forEach(v => searchParams.append(key, v))
+                    } else {
+                        searchParams.append(key, String(value))
+                    }
+                }
+                return searchParams.toString()
+            }
+        }
     })
 }
 
@@ -114,5 +132,26 @@ export const getStates = () => {
     return request<any, { states: string[] }>({
         url: '/doctors/states',
         method: 'get'
+    })
+}
+
+export const downloadTemplate = () => {
+    return request({
+        url: '/doctors/batch/template',
+        method: 'get',
+        responseType: 'blob'
+    })
+}
+
+export const importDoctors = (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request<any, any>({
+        url: '/doctors/batch/import',
+        method: 'post',
+        data: formData,
+        headers: {
+            'Content-Type': 'multipart/form-data'
+        }
     })
 }

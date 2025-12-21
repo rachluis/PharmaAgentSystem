@@ -140,6 +140,13 @@ class ETLProcessor:
         
         # Drop rows with invalid dates
         chunk = chunk.dropna(subset=['Date_of_Payment'])
+
+        # Clean Specialty: Remove redundant prefix (keep content after first '|')
+        # Example: 'Allopathic & Osteopathic Physicians|Internal Medicine|Cardiovascular Disease' -> 'Internal Medicine|Cardiovascular Disease'
+        if 'Covered_Recipient_Specialty_1' in chunk.columns:
+            chunk['Covered_Recipient_Specialty_1'] = chunk['Covered_Recipient_Specialty_1'].apply(
+                lambda x: x.split('|', 1)[1] if isinstance(x, str) and '|' in x else x
+            )
         
         return chunk
     

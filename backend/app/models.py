@@ -25,6 +25,8 @@ class User(Base):
     email = Column(String(100), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(100), nullable=True)
+    phone = Column(String(20), nullable=True)
+    bio = Column(Text, nullable=True)
     role = Column(String(20), default="viewer")  # admin / analyst / viewer
     avatar_url = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
@@ -35,7 +37,6 @@ class User(Base):
     # Relationships
     analysis_tasks = relationship("AnalysisTask", back_populates="creator")
     ai_reports = relationship("AIReport", back_populates="creator")
-    system_logs = relationship("SystemLog", back_populates="user")
     
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username})>"
@@ -239,31 +240,42 @@ class AIReport(Base):
         return f"<AIReport(id={self.report_id}, title={self.report_title})>"
 
 
-class SystemLog(Base):
+class LoginLog(Base):
     """
-    System log table - audit trail for all API operations.
-    Used for security monitoring, debugging, and usage analytics.
+    Log table for user login attempts.
     """
-    __tablename__ = "system_logs"
+    __tablename__ = "sys_login_logs"
     
-    # Primary key
-    log_id = Column(Integer, primary_key=True, autoincrement=True)
-    
-    # User and action
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    action = Column(String(100), nullable=False, comment="操作名称 (login, register, run_clustering)")
-    module = Column(String(50), nullable=False, comment="模块名称 (auth, analysis, reports)")
-    
-    # Request details
-    ip_address = Column(String(50), nullable=True, comment="IP地址")
-    request_data = Column(Text, nullable=True, comment="请求数据 (JSON)")
-    response_status = Column(Integer, nullable=True, comment="HTTP状态码")
-    
-    # Timestamp
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
-    # Relationship
-    user = relationship("User", back_populates="system_logs", foreign_keys=[user_id])
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), nullable=False, index=True)
+    ip_address = Column(String(50), nullable=True)
+    browser = Column(String(200), nullable=True)
+    os = Column(String(100), nullable=True)
+    status = Column(Integer, default=1, comment="1=Success, 0=Failed")
+    message = Column(String(255), nullable=True)
+    login_time = Column(DateTime(timezone=True), server_default=func.now())
     
     def __repr__(self):
-        return f"<SystemLog(id={self.log_id}, action={self.action}, user_id={self.user_id})>"
+        return f"<LoginLog(username={self.username}, status={self.status})>"
+
+
+class OperationLog(Base):
+    """
+    Log table for critical system operations (POST/PUT/DELETE).
+    """
+    __tablename__ = "sys_op_logs"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), nullable=True, index=True)
+    module = Column(String(50), nullable=True, comment="Module name")
+    summary = Column(String(255), nullable=True, comment="Operation summary")
+    method = Column(String(10), nullable=False, comment="HTTP Method")
+    path = Column(String(255), nullable=False, comment="Request Path")
+    params = Column(Text, nullable=True, comment="Request Params/Body (JSON)")
+    status = Column(Integer, nullable=True, comment="HTTP Status Code")
+    latency_ms = Column(Integer, nullable=True, comment="Latency in ms")
+    error_msg = Column(Text, nullable=True, comment="Error stack trace")
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"<OperationLog(module={self.module}, summary={self.summary})>"

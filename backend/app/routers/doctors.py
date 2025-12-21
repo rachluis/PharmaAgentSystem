@@ -2,9 +2,12 @@
 Doctors API Router.
 Handles doctor data queries, statistics, and details.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+import pandas as pd
+import io
 from typing import Optional, List
 from pydantic import BaseModel
 
@@ -113,11 +116,15 @@ async def delete_doctor(npi: str, db: Session = Depends(get_db)):
 async def get_doctors(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    specialty: Optional[str] = Query(None, description="Filter by specialty"),
-    state: Optional[str] = Query(None, description="Filter by state"),
+    specialty: Optional[List[str]] = Query(None, description="Filter by specialty (multi-select)"),
+    state: Optional[List[str]] = Query(None, description="Filter by state (multi-select)"),
     cluster_id: Optional[int] = Query(None, description="Filter by cluster ID"),
     min_monetary: Optional[float] = Query(None, description="Minimum monetary value"),
     max_monetary: Optional[float] = Query(None, description="Maximum monetary value"),
+    min_frequency: Optional[int] = Query(None, description="Minimum frequency"),
+    max_frequency: Optional[int] = Query(None, description="Maximum frequency"),
+    min_recency: Optional[int] = Query(None, description="Minimum recency (days)"),
+    max_recency: Optional[int] = Query(None, description="Maximum recency (days)"),
     search: Optional[str] = Query(None, description="Search by name or NPI"),
     db: Session = Depends(get_db)
 ):
@@ -128,15 +135,30 @@ async def get_doctors(
     
     # Apply filters
     if specialty:
-        query = query.filter(Doctor.specialty == specialty)
+        query = query.filter(Doctor.specialty.in_(specialty))
     if state:
-        query = query.filter(Doctor.state == state)
+        query = query.filter(Doctor.state.in_(state))
     if cluster_id is not None:
         query = query.filter(Doctor.cluster_id == cluster_id)
+    
+    # monetary
     if min_monetary is not None:
         query = query.filter(Doctor.monetary >= min_monetary)
     if max_monetary is not None:
         query = query.filter(Doctor.monetary <= max_monetary)
+        
+    # frequency
+    if min_frequency is not None:
+        query = query.filter(Doctor.frequency >= min_frequency)
+    if max_frequency is not None:
+        query = query.filter(Doctor.frequency <= max_frequency)
+        
+    # recency
+    if min_recency is not None:
+        query = query.filter(Doctor.recency_days >= min_recency)
+    if max_recency is not None:
+        query = query.filter(Doctor.recency_days <= max_recency)
+
     if search:
         search_pattern = f"%{search}%"
         query = query.filter(
@@ -271,3 +293,101 @@ async def get_doctor_payments(
         "total": total,
         "items": payments
     }
+
+
+@router.get("/batch/template")
+async def get_import_template():
+    """Generate and return an Excel template for batch import."""
+    df = pd.DataFrame(columns=[
+        'npi', 'first_name', 'last_name', 'specialty', 'state', 'primary_type'
+    ])
+    
+    # Add a sample row
+    df.loc[0] = ['1234567890', 'John', 'Doe', 'Internal Medicine', 'CA', 'Medical Doctor']
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Doctors')
+    
+    output.seek(0)
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=doctor_import_template.xlsx"}
+    )
+
+
+@router.post("/batch/import")
+async def import_doctors(
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db)
+):
+    """Import doctors from Excel or CSV file."""
+    try:
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(file.file)
+        elif file.filename.endswith(('.xls', '.xlsx')):
+            df = pd.read_excel(file.file)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid file format. Support CSV/Excel.")
+        
+        # Validate columns
+        required_cols = {'npi', 'first_name', 'last_name'}
+        if not required_cols.issubset(df.columns):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Missing required columns. Needed: {list(required_cols)}"
+            )
+        
+        # Basic cleaning
+        df['npi'] = df['npi'].astype(str).str.split('.').str[0].str.strip()
+        df = df[df['npi'].str.len() == 10] # Must be 10 digits
+        
+        # Check for duplicates in the file
+        if df['npi'].duplicated().any():
+            dupes = df[df['npi'].duplicated()]['npi'].tolist()
+            raise HTTPException(status_code=400, detail=f"Duplicate NPIs found in file: {dupes[:5]}")
+
+        # Check existing NPIs in DB
+        existing_npis = set(row[0] for row in db.query(Doctor.npi).all())
+        new_doctors = []
+        skipped_count = 0
+        
+        for _, row in df.iterrows():
+            if row['npi'] in existing_npis:
+                skipped_count += 1
+                continue
+            
+            # Create instance
+            new_doctor = Doctor(
+                npi=row['npi'],
+                first_name=row.get('first_name'),
+                last_name=row.get('last_name'),
+                full_name=f"{row.get('first_name', '')} {row.get('last_name', '')}".strip(),
+                specialty=row.get('specialty'),
+                state=row.get('state'),
+                primary_type=row.get('primary_type', 'Medical Doctor'),
+                monetary=0.0,
+                frequency=0
+            )
+            new_doctors.append(new_doctor)
+            existing_npis.add(row['npi']) 
+        
+        if new_doctors:
+            db.add_all(new_doctors)
+            db.commit()
+            
+        return {
+            "status": "success",
+            "message": f"Successfully imported {len(new_doctors)} doctors.",
+            "total_records": len(df),
+            "inserted": len(new_doctors),
+            "skipped_duplicates": skipped_count
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

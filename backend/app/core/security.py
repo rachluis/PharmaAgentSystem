@@ -15,8 +15,10 @@ from ..config import get_settings
 
 settings = get_settings()
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import bcrypt
+
+# Note: switched to direct bcrypt library to avoid passlib implementation bugs
+# and handle the 72-character limit explicitly.
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -26,15 +28,25 @@ SECRET_KEY = settings.secret_key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
 
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a hashed password."""
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        # Bcrypt has a 72-byte limit, truncate to be safe and consistent
+        return bcrypt.checkpw(
+            plain_password[:72].encode('utf-8'), 
+            hashed_password.encode('utf-8')
+        )
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:
     """Generate a password hash."""
-    return pwd_context.hash(password)
+    # Truncate to 72 bytes before hashing (bcrypt limit)
+    return bcrypt.hashpw(
+        password[:72].encode('utf-8'), 
+        bcrypt.gensalt()
+    ).decode('utf-8')
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

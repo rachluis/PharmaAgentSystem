@@ -36,6 +36,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.core.logging_middleware import LoggingMiddleware
+app.add_middleware(LoggingMiddleware)
+
 
 @app.get("/")
 async def root():
@@ -57,9 +60,10 @@ async def health_check():
     }
 
 
-from .routers import analysis_tasks, auth, doctors, reports
+from .routers import analysis_tasks, auth, doctors, reports, system
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(doctors.router, prefix="/api/v1/doctors", tags=["doctors"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(analysis_tasks.router, prefix="/api/v1/analysis/tasks", tags=["analysis-tasks"])
+app.include_router(system.router, prefix="/api/v1/system", tags=["system"])
