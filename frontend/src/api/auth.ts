@@ -56,3 +56,16 @@ export const logout = () => {
         method: 'post'
     })
 }
+
+export const uploadAvatar = (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request<any, User>({
+        url: '/auth/upload-avatar',
+        method: 'post',
+        headers: {
+            'Content-Type': 'multipart/form-data'
+        },
+        data: formData
+    })
+}

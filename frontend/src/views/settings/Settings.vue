@@ -8,9 +8,16 @@
           <div class="tab-content">
             <h2 class="tab-title">个人资料</h2>
             <div class="profile-header">
-                <el-avatar :size="80" :src="form.avatar_url || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
+                <el-avatar :size="80" :src="getFullAvatarUrl(form.avatar_url)" />
                 <div class="upload-area">
-                    <el-button type="primary" size="small" @click="handleAvatarClick">更换头像</el-button>
+                    <input 
+                        type="file" 
+                        ref="fileInput" 
+                        accept="image/*" 
+                        style="display: none" 
+                        @change="handleFileChange" 
+                    />
+                    <el-button type="primary" size="small" :loading="uploading" @click="handleAvatarClick">更换头像</el-button>
                     <p class="tip-text">支持 JPG, PNG 格式，文件小于 2MB</p>
                 </div>
             </div>
@@ -85,7 +92,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { getProfile, updateProfile, changePassword } from '@/api/auth'
+import { getProfile, updateProfile, changePassword, uploadAvatar } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -95,6 +102,9 @@ const activeTab = ref(route.query.tab?.toString() || 'profile')
 // --- Profile Logic ---
 const formRef = ref<FormInstance>()
 const saving = ref(false)
+const uploading = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+
 const form = reactive({
     id: 0,
     username: '',
@@ -104,6 +114,15 @@ const form = reactive({
     bio: '',
     avatar_url: ''
 })
+
+const getFullAvatarUrl = (url: string) => {
+    if (!url) return 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
+    if (url.startsWith('http')) return url
+    return `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}${url}`.replace('/api/v1/uploads', '/uploads')
+    // Fix path logic: Backend mounts /uploads at root, but avatar_url is stored as /uploads/avatars/xxx.
+    // We need to construct full URL. 
+    // If backend is localhost:8000, then http://localhost:8000/uploads/avatars/xxx
+}
 
 const rules = reactive<FormRules>({
     email: [
@@ -161,7 +180,35 @@ const handleSaveProfile = async () => {
 }
 
 const handleAvatarClick = () => {
-    ElMessage.info('头像上传功能暂未实现 (Mock)')
+    fileInput.value?.click()
+}
+
+const handleFileChange = async (event: Event) => {
+    const target = event.target as HTMLInputElement
+    if (target.files && target.files.length > 0) {
+        const file = target.files[0]
+        if (!file) return; // TS guard
+        
+        // Validate size (2MB)
+        if (file.size > 2 * 1024 * 1024) {
+            ElMessage.error('图片大小不能超过 2MB')
+            return
+        }
+        
+        uploading.value = true
+        try {
+            const user = await uploadAvatar(file)
+            form.avatar_url = user.avatar_url || ''
+            userStore.setUser(user as any)
+            ElMessage.success('头像上传成功')
+        } catch (e: any) {
+            ElMessage.error(e.response?.data?.detail || '头像上传失败')
+        } finally {
+            uploading.value = false
+            // Reset input
+            if (fileInput.value) fileInput.value.value = ''
+        }
+    }
 }
 
 // --- Security Logic ---

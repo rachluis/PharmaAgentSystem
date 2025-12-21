@@ -36,6 +36,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.staticfiles import StaticFiles
+import os
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 from app.core.logging_middleware import LoggingMiddleware
 app.add_middleware(LoggingMiddleware)
 

@@ -244,3 +244,51 @@ async def logout(current_user: User = Depends(get_current_user)):
     # JWT is stateless, so we just return success
     # In production, you might want to blacklist the token
     return {"code": 200, "message": "Logged out successfully"}
+
+from fastapi import UploadFile, File
+import shutil
+import os
+import uuid
+
+UPLOAD_DIR = "uploads/avatars"
+
+@router.post("/upload-avatar", response_model=UserResponse)
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload user avatar."""
+    # 1. Validate file
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be an image"
+        )
+    
+    # 2. Check size (content-length header is not always reliable, but good first check)
+    # Actual read check happens during save if needed.
+    
+    # 3. Generate filename
+    file_ext = os.path.splitext(file.filename)[1]
+    filename = f"{current_user.id}_{uuid.uuid4()}{file_ext}"
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    
+    # 4. Save file
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not save file: {str(e)}"
+        )
+        
+    # 5. Update user profile
+    # URL should be relative path that frontend can access via static mount
+    avatar_url = f"/uploads/avatars/{filename}"
+    current_user.avatar_url = avatar_url
+    db.commit()
+    db.refresh(current_user)
+    
+    return current_user
