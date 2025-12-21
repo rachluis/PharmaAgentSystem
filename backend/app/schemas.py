@@ -3,7 +3,7 @@ Pydantic schemas for API request/response validation.
 """
 from datetime import date, datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ============== Doctor Schemas ==============
@@ -98,9 +98,25 @@ class ClusterResultBase(BaseModel):
     cluster_name: Optional[str] = None
     size_count: Optional[int] = None
     size_percentage: Optional[float] = None
-    kpi_summary: Optional[Dict[str, Any]] = None
+    
+    # Analysis metadata
+    task_id: Optional[int] = None
+    algorithm: Optional[str] = None
+    features_used: Optional[Any] = None  # Will be parsed from JSON
+    cluster_labels: Optional[Dict[str, str]] = None  # Will be parsed from JSON
+    
+    # Quality metrics
+    silhouette_score: Optional[float] = None
+    inertia: Optional[float] = None
+    
+    # KPI and strategy
+    kpi_summary: Optional[Dict[str, Any]] = None  # Will be parsed from JSON
     strategy_focus: Optional[str] = None
     context_for_llm: Optional[str] = None
+    
+    # Visualization
+    visualization_data: Optional[Any] = None  # Will be parsed from JSON
+    is_active: Optional[bool] = None
 
 
 class ClusterResultCreate(ClusterResultBase):
@@ -110,6 +126,19 @@ class ClusterResultCreate(ClusterResultBase):
 
 class ClusterResultResponse(ClusterResultBase):
     """Cluster result response."""
+    
+    @field_validator('kpi_summary', 'cluster_labels', 'features_used', 'visualization_data', mode='before')
+    @classmethod
+    def parse_json_fields(cls, v):
+        """Parse JSON string fields to dict/list if needed."""
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except:
+                return None
+        return v
+    
     class Config:
         from_attributes = True
 
@@ -153,6 +182,18 @@ class AnalysisTaskResponse(AnalysisTaskBase):
     completed_at: Optional[datetime] = None
     created_at: datetime
     result_id: Optional[int] = None
+    
+    @field_validator('parameters', mode='before')
+    @classmethod
+    def parse_parameters(cls, v):
+        """Parse JSON string to dict if needed."""
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except:
+                return None
+        return v
     
     class Config:
         from_attributes = True

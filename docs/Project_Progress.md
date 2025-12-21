@@ -142,7 +142,6 @@ PharmaAgentSystem/
   ```
   backend/notebooks/clustering_experiment.ipynb
   ```
-
 * 包含: 数据加载 -> RFM 可视化 -> 预处理 -> K 值选择 (Elbow/Silhouette) -> 3D 聚类图 -> 雷达图 -> 业务解读。
 * **使用** : 您可以在 VS Code 中直接打开此文件运行。
 
@@ -221,3 +220,130 @@ GET /api/analysis/results
 
 * 配置 Dify 知识库和工作流。
 * 编写 Prompt：基于 `cluster_results` 表中的 JSON 数据生成营销策略。
+* 
+
+# 项目进展与开发路线图 (Project Progress & Roadmap)
+
+ **项目名称** : 基于多智能体的医药市场画像与策略生成系统
+ **当前阶段** : Phase 4 - AI 集成与可视化 (In Progress)
+ **最后更新** : 2025-12-21
+
+## 1. 项目概况与状态 (Status Overview)
+
+### ✅ 已完成工作 (Completed)
+
+1. **后端架构** : FastAPI + SQLite 骨架搭建完毕。
+2. **数据 ETL** : 完成 73万+ 医生数据的清洗入库。
+3. **核心算法** : K-Means 聚类服务已封装。
+4. **业务功能** : 医生管理 CRUD、批量导入导出、个人中心设计。
+5. **AI 策略服务** :
+
+* 实现 SSE 流式接口 (`generate-stream`)。
+* 完成前端 AI 对话弹窗与 Markdown 实时渲染。
+* 实现 Mock 模式，无 Key 也能演示。
+
+### 🚧 待启动 (Pending)
+
+* **[Current Action]** Dify 平台配置 (Prompt 编排 & API Key 获取)。
+* **[Next]** 聚类结果可视化 (3D 散点图、雷达图)。
+* **[Next]** 首页 Dashboard 综合看板。
+
+## 2. Dify 集成指南
+
+### 2.1 核心逻辑
+
+* **系统** : 将聚类统计数据 (Cluster Stats) 转换为自然语言描述。
+* **Dify** : 接收描述，扮演“资深医药营销专家”，输出策略。
+* **协议** : SSE (Server-Sent Events) 流式传输。
+
+## 3. 下一步指令 (Task 14 & 15)
+
+**Task 14: Dify 平台配置与真机联调**
+
+* **平台操作** : 创建 Dify 应用，编写 System Prompt。
+* **后端验证** : 填入真实 API Key，验证 Python 服务与 Dify 云端的连通性。
+
+**Task 15: 聚类结果可视化 (ECharts)**
+
+* **目标** : 在 Analysis 页面展示硬核数据分析图表。
+* **图表** :
+* **雷达图** : 展示当前选中聚类的特征 (R/F/M 偏好)。
+* **3D 散点图** : 展示所有医生的分布情况。
+
+```
+
+---
+
+### 第二步：Dify 平台配置指南 (手动操作)
+
+这是你需要**亲自操作**的部分（因为 Agent 无法帮你点浏览器）。请按照以下步骤配置你的“AI 大脑”。
+
+#### 1. 注册/登录
+访问 [Dify.ai](https://dify.ai/) 或你本地部署的 Dify 地址，登录账号。
+
+#### 2. 创建应用
+* 点击 **"创建应用 (Create App)"**。
+* 选择类型：**聊天助手 (Chat App)** (这是最简单的对接方式)。
+* 名称：`Pharma Strategy Agent`。
+* 图标：选个像医生的。
+
+#### 3. 编排提示词 (Prompt Engineering)
+进入 **"编排 (Orchestrate)"** 页面，在 **"前置提示词 (System Prompt)"** 区域，复制粘贴以下内容。这是让 AI 变聪明的关键：
+
+```text
+# Role
+你是一位拥有20年经验的跨国医药公司（如辉瑞、阿斯利康）市场部总监。你擅长制定精准的医生学术推广策略。
+
+# Goal
+你需要根据用户提供的“医生群体画像数据”，制定一份专业的、可执行的季度市场推广策略报告。
+
+# Input Format
+用户会发送如下格式的数据：
+"群体名称: 高价值核心医生
+平均处方金额(M): $15,000
+平均互动频次(F): 45次
+最近互动天数(R): 12天
+主要科室: 心血管内科
+偏好支付类型: 学术会议、咨询费"
+
+# Output Requirements (Markdown)
+请按以下结构输出报告，语气专业、精炼：
+
+## 1. 群体洞察 (Insight)
+(一句话总结该群体的核心价值和行为特征)
+
+## 2. 核心策略 (Core Strategy)
+(提出一个响亮的策略口号，如“学术引领，深度绑定”)
+
+## 3. 具体的行动计划 (Action Plan)
+* **学术会议**: (建议举办什么级别的会议？)
+* **拜访频率**: (代表应该多久去一次？)
+* **资源投放**: (重点投放在哪里？)
+
+## 4. 预期ROI分析
+(简述投入产出比预期)
+
+# Constraints
+* 必须使用中文。
+* 严禁通过简单的送礼维持关系，必须强调合规与学术价值。
+```
+
+#### 4. 选择模型
+
+右上角选择模型，推荐 **Gemini Pro 1.5** 或 **GPT-4o** (如果预算允许)，或者 **GPT-3.5-turbo** (速度快便宜)。
+
+#### 5. 发布与获取 Key
+
+* 点击右上角 **"发布 (Publish)"** ->  **"更新 (Update)"** 。
+* 点击左侧菜单  **"访问 API (Access API)"** 。
+* 点击 **"API 密钥 (API Keys)"** ->  **"创建密钥"** 。
+* **复制这个密钥** (例如 `app-xxxxxxxx`)。
+
+#### 6. 配置项目
+
+回到你的 VS Code，打开 `backend/.env` 文件（如果没有就新建），填入：
+
+```
+DIFY_API_KEY=app-xxxxxxxxxxxxxxxxxxxx
+DIFY_API_URL=https://api.dify.ai/v1  # 或者是你私有部署的地址
+```

@@ -10,10 +10,7 @@ from ..schemas import AnalysisTaskCreate, AnalysisTaskResponse
 from ..core.security import get_current_active_user
 from ..services.analysis_service import analysis_service
 
-router = APIRouter(
-    prefix="/analysis/tasks",
-    tags=["Analysis Tasks"]
-)
+router = APIRouter()  # Remove prefix here, it's added in main.py
 
 @router.post("", response_model=AnalysisTaskResponse)
 async def create_analysis_task(

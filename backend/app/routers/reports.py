@@ -1,12 +1,11 @@
-"""
-Reports API Router.
-Handles AI report generation, listing, and retrieval.
-"""
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import Optional, List
 from datetime import datetime
+from pydantic import BaseModel
+import time
 
 from ..database import get_db
 from ..models import User, AIReport, ClusterResult, Doctor
@@ -15,6 +14,12 @@ from ..core.security import get_current_user
 from ..services.dify_service import dify_service
 
 router = APIRouter()
+
+
+class GenerateStrategyRequest(BaseModel):
+    cluster_id: int
+    user_prompt: Optional[str] = None
+
 
 @router.get("", response_model=AIReportList)
 async def get_reports(
@@ -67,40 +72,104 @@ async def get_report(
     return report
 
 
-@router.post("/generate", status_code=201)
-async def generate_report(
-    request: AIReportCreate,
-    background_tasks: BackgroundTasks,
+@router.post("/generate-stream")
+async def generate_strategy_stream(
+    request: GenerateStrategyRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Generate a new AI report (async task).
-    Returns report_id immediately, actual generation happens in background.
+    Generate AI strategy report with SSE streaming.
+    Returns text/event-stream for real-time display.
     """
-    # Create new report record
-    new_report = AIReport(
-        report_title=request.report_title,
-        report_type=request.report_type,
-        report_content="正在生成中...",
-        status="generating",
-        generated_by=current_user.id,
-        related_cluster_id=request.related_cluster_id,
-        related_npi=request.related_npi,
-        dify_conversation_id=request.dify_conversation_id
+    # Get cluster result
+    cluster = db.query(ClusterResult).filter(ClusterResult.cluster_id == request.cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    
+    # Prepare cluster statistics as JSON string
+    cluster_stats_json = dify_service.prepare_cluster_stats(cluster)
+    
+    async def event_generator():
+        start_time = time.time()
+        full_content = []
+        
+        async for chunk in dify_service.stream_chat(
+            cluster_stats=cluster_stats_json,
+            user_intent=request.user_prompt or "",
+            user_id=str(current_user.id)
+        ):
+            full_content.append(chunk)
+            yield f"data: {chunk}\n\n"
+        
+        # Signal end
+        yield "data: [DONE]\n\n"
+        
+        # Save report (non-streaming, after completion)
+        generation_time = time.time() - start_time
+        dify_service.save_report(
+            db=db,
+            title=f"AI策略报告 - Cluster {request.cluster_id}",
+            content="".join(full_content),
+            cluster_id=request.cluster_id,
+            user_id=current_user.id,
+            user_prompt=request.user_prompt,
+            generation_time=generation_time
+        )
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
     )
+
+
+@router.post("/generate", status_code=201)
+async def generate_report_sync(
+    request: AIReportCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate and save an AI report (non-streaming, synchronous).
+    """
+    # Get cluster result if related
+    cluster = None
+    cluster_stats_json = ""
+    if request.related_cluster_id:
+        cluster = db.query(ClusterResult).filter(ClusterResult.cluster_id == request.related_cluster_id).first()
+        if cluster:
+            cluster_stats_json = dify_service.prepare_cluster_stats(cluster)
     
-    db.add(new_report)
-    db.commit()
-    db.refresh(new_report)
+    # Generate content (collect all chunks)
+    content_parts = []
+    async for chunk in dify_service.stream_chat(
+        cluster_stats=cluster_stats_json,
+        user_intent="",
+        user_id=str(current_user.id)
+    ):
+        content_parts.append(chunk)
     
-    # Trigger Background Task
-    background_tasks.add_task(dify_service.generate_report, db, new_report.report_id)
+    content = "".join(content_parts)
+    
+    # Save report
+    report = dify_service.save_report(
+        db=db,
+        title=request.report_title,
+        content=content,
+        cluster_id=request.related_cluster_id or 0,
+        user_id=current_user.id,
+        generation_time=0.0
+    )
     
     return {
         "code": 201,
-        "message": "Report generation started",
-        "report_id": new_report.report_id
+        "message": "Report generated successfully",
+        "report_id": report.report_id
     }
 
 
