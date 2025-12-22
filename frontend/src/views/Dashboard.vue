@@ -169,11 +169,16 @@ const renderCharts = () => {
         type: 'bar',
         data: stateData.map(d => d[1]),
         itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: '#83bff6' },
-            { offset: 0.5, color: '#188df0' },
-            { offset: 1, color: '#188df0' }
-          ])
+          color: (params: any) => {
+            // Gradient from big (index 0) to small
+            // Use a consistent blue-cyan gradient for bar set
+            // Index 0 (max) is darkest/most vibrant, down to lighter
+            const opacity = 1 - (params.dataIndex / stateData.length) * 0.6
+            return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: '#83bff6' }, // Light top
+              { offset: 1, color: `rgba(24, 141, 240, ${opacity})` } // Varying opacity bottom
+            ])
+          }
         },
         barWidth: '60%'
       }]

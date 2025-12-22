@@ -237,9 +237,18 @@ class DifyService:
             created_at=datetime.utcnow()
         )
         db.add(report)
+        
+        # Also update the ClusterResult strategy_focus for easy access
+        cluster_result = db.query(ClusterResult).filter(ClusterResult.cluster_id == cluster_id).first()
+        if cluster_result:
+            cluster_result.strategy_focus = report.report_summary
+            # Also update context_for_llm if distinct from kpi_summary
+            if user_prompt:
+                cluster_result.context_for_llm = f"Last User Prompt: {user_prompt}"
+                
         db.commit()
         db.refresh(report)
-        logger.info(f"Saved report {report.report_id} for cluster {cluster_id}")
+        logger.info(f"Saved report {report.report_id} and updated cluster {cluster_id}")
         return report
 
 

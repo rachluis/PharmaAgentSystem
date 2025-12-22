@@ -107,11 +107,16 @@ const getReport = (reportId: number) => {
   return request.get(`/reports/${reportId}`)
 }
 
+const deleteReport = (reportId: number) => {
+  return request.delete(`/reports/${reportId}`)
+}
+
 export const analysisApi = {
   getClusterResults,
   createTask,
   getTask,
   generateStrategyStream,
   getReports,
-  getReport
+  getReport,
+  deleteReport
 }

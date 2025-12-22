@@ -13,19 +13,23 @@
       
       <el-table :data="reports" stripe v-loading="loading">
         <el-table-column prop="report_id" label="ID" width="80" />
-        <el-table-column prop="report_title" label="报告标题" min-width="200" />
-        <el-table-column prop="report_type" label="类型" width="120">
+        <el-table-column prop="report_title" label="报告标题" width="500" />
+        <el-table-column prop="report_type" label="类型" width="150">
           <template #default="{ row }">
             <el-tag>{{ getReportTypeName(row.report_type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="150">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="创建时间" width="300">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" size="small" link @click="viewReport(row.report_id)">
               查看
@@ -189,6 +193,15 @@ const getStatusType = (status: string) => {
     archived: ''
   }
   return types[status] || ''
+}
+
+const formatDateTime = (dateStr: string) => {
+  if (!dateStr) return '-'
+  try {
+    return new Date(dateStr).toLocaleString()
+  } catch (e) {
+    return dateStr
+  }
 }
 
 onMounted(() => {

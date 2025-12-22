@@ -48,6 +48,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'AI报告', requiresAuth: true }
       },
       {
+        path: 'reports/:id',
+        name: 'report-detail',
+        component: () => import('@/views/reports/ReportDetail.vue'),
+        meta: { title: '报告详情', requiresAuth: true }
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('@/views/settings/Settings.vue'),
