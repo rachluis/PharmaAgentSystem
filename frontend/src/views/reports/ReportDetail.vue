@@ -137,10 +137,11 @@ onMounted(() => {
   text-decoration: underline;
 }
 
+/* Markdown Styles with Theme Support */
 .markdown-body {
   font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;
   line-height: 1.8;
-  color: #2c3e50;
+  color: var(--card-foreground);
   padding: 10px;
 }
 
@@ -151,7 +152,8 @@ onMounted(() => {
   font-weight: 600;
   line-height: 1.25;
   padding-bottom: .3em;
-  border-bottom: 1px solid #eaecef;
+  border-bottom: 1px solid var(--border);
+  color: var(--card-foreground);
 }
 
 .markdown-body :deep(h1) { font-size: 2em; }
@@ -173,8 +175,8 @@ onMounted(() => {
 
 .markdown-body :deep(blockquote) {
   padding: 0 1em;
-  color: #6a737d;
-  border-left: 0.25em solid #dfe2e5;
+  color: var(--muted-foreground);
+  border-left: 0.25em solid var(--border);
   margin: 0 0 16px 0;
 }
 
@@ -182,7 +184,8 @@ onMounted(() => {
   padding: .2em .4em;
   margin: 0;
   font-size: 85%;
-  background-color: rgba(27,31,35,.05);
+  background-color: var(--accent);
+  color: var(--primary);
   border-radius: 3px;
 }
 
@@ -191,12 +194,14 @@ onMounted(() => {
   overflow: auto;
   font-size: 85%;
   line-height: 1.45;
-  background-color: #f6f8fa;
+  background-color: var(--secondary);
   border-radius: 6px;
+  border: 1px solid var(--border);
 }
 
 .markdown-body :deep(pre code) {
   background-color: transparent;
+  color: var(--secondary-foreground);
   padding: 0;
 }
 </style>

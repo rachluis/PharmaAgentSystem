@@ -65,40 +65,58 @@
 }
 
 /* Dark Theme */
+/* Dark Theme - Modern Slate Blue (Tailored for Pharma System) */
 html.dark {
-  --background: #141414;
-  --foreground: #e5e5e7;
-  --card: #1f1f1f;
-  --card-foreground: #e5e5e7;
-  --popover: #1f1f1f;
-  --popover-foreground: #e5e5e7;
-  --primary: #409eff;
+  --background: #0b1121; /* Very dark blue-grey, almost black */
+  --foreground: #e2e8f0; /* Slate-200 */
+
+  --card: #1e293b; /* Slate-800 - distinct from background */
+  --card-foreground: #f8fafc; /* Slate-50 */
+
+  --popover: #1e293b;
+  --popover-foreground: #f8fafc;
+
+  --primary: #3b82f6; /* Blue-500, slightly softer than raw blue */
   --primary-foreground: #ffffff;
-  --secondary: #2a2a2a;
-  --secondary-foreground: #e5e5e7;
-  --muted: #2a2a2a;
-  --muted-foreground: #8e8e93;
-  --accent: #1a3a5c;
-  --accent-foreground: #e5e5e7;
-  --destructive: #f56c6c;
-  --border: #3a3a3c;
-  --input: #3a3a3c;
-  --ring: #409eff;
 
-  /* Sidebar Dark */
-  --sidebar: #0d0d0d;
-  --sidebar-foreground: rgba(255, 255, 255, 0.85);
-  --sidebar-muted: rgba(255, 255, 255, 0.65);
-  --sidebar-accent: #1a1a1a;
-  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --secondary: #334155; /* Slate-700 */
+  --secondary-foreground: #f1f5f9;
 
-  /* Shadows Dark */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4),
-    0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4),
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8; /* Slate-400 */
+
+  --accent: #334155; /* Slate-700 for hover states */
+  --accent-foreground: #f8fafc;
+
+  --destructive: #ef4444; /* Red-500 */
+
+  --border: #334155; /* Slate-700 - visible but subtle borders */
+  --input: #1e293b;
+  --ring: #3b82f6;
+
+  /* Sidebar Dark - seamlessly blends but slightly distinct */
+  --sidebar: #0f172a; /* Slate-900 */
+  --sidebar-foreground: #cbd5e1; /* Slate-300 */
+  --sidebar-muted: #64748b; /* Slate-500 */
+  --sidebar-accent: #1e293b; /* Slate-800 */
+  --sidebar-border: #1e293b;
+
+  /* ELement Plus Overrides for Dark Mode */
+  --el-color-primary: #3b82f6;
+  --el-bg-color: #0b1121;
+  --el-bg-color-overlay: #1e293b;
+  --el-text-color-primary: #e2e8f0;
+  --el-text-color-regular: #cbd5e1;
+  --el-border-color: #334155;
+  --el-border-color-light: #334155;
+
+  /* Shadows Dark - softer shadows for depth */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.5),
     0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.5),
+    0 10px 10px -5px rgba(0, 0, 0, 0.3);
 }
 
 /* Base Styles */

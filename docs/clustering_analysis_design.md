@@ -55,7 +55,7 @@
 └─────────────────────────────────────────────────────┘
 ```
 
-### 1.2 核心业务流程（重要！）
+### 1.2 核心业务流程
 
 ```mermaid
 sequenceDiagram
@@ -438,19 +438,19 @@ def init_tables():
         # 检查列是否存在
         result = conn.execute(text("PRAGMA table_info(doctors)"))
         columns = [row[1] for row in result.fetchall()]
-      
+    
         if 'cluster_id' not in columns:
             conn.execute(text("ALTER TABLE doctors ADD COLUMN cluster_id INTEGER"))
             print("✓ Added cluster_id to doctors table")
-      
+    
         if 'cluster_label' not in columns:
             conn.execute(text("ALTER TABLE doctors ADD COLUMN cluster_label VARCHAR(50)"))
             print("✓ Added cluster_label to doctors table")
-      
+    
         # 创建索引
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_doctors_cluster ON doctors(cluster_id)"))
         print("✓ Created index on cluster_id")
-      
+    
         conn.commit()
   
     print("✅ All clustering tables initialized successfully!")
@@ -498,73 +498,73 @@ class AnalysisService:
     ) -> ClusterResult:
         """
         执行K-Means聚类分析
-      
+    
         Args:
             k: 聚类数量 (2-10)
             features: 特征列表，默认 ['rfm_frequency', 'rfm_monetary']
             task_name: 任务名称
             user_id: 创建任务的用户ID
-      
+    
         Returns:
             ClusterResult对象
-      
+    
         Raises:
             AnalysisException: 分析过程中的错误
         """
         start_time = datetime.utcnow()
-      
+    
         try:
             # 1. 创建任务记录
             task = self._create_task(k, features, task_name, user_id)
-          
+        
             # 2. 验证参数
             self._validate_parameters(k, features)
-          
+        
             # 3. 加载数据
             logger.info(f"Loading data for task {task.task_id}...")
             df = self._load_data()
-          
+        
             if len(df) < k:
                 raise AnalysisException(f"数据量不足：需要至少{k}条记录，当前仅{len(df)}条")
-          
+        
             # 4. 数据预处理
             logger.info("Preprocessing data...")
             X, feature_names = self._preprocess_data(df, features)
-          
+        
             # 5. 执行聚类
             logger.info(f"Performing K-Means clustering with k={k}...")
             task.status = 'running'
             task.progress = 30
             self.db.commit()
-          
+        
             kmeans, labels = self._fit_kmeans(X, k)
             df['cluster'] = labels
-          
+        
             # 6. 计算评估指标
             logger.info("Calculating evaluation metrics...")
             task.progress = 60
             self.db.commit()
-          
+        
             metrics = self._calculate_metrics(X, labels)
-          
+        
             # 7. 计算聚类统计
             logger.info("Computing cluster statistics...")
             task.progress = 80
             self.db.commit()
-          
+        
             cluster_stats = self._compute_cluster_stats(df, k, feature_names)
-          
+        
             # 8. 生成业务标签
             cluster_labels = self._generate_business_labels(cluster_stats)
-          
+        
             # 9. 准备可视化数据
             logger.info("Preparing visualization data...")
             viz_data = self._prepare_visualization_data(df, kmeans, k)
-          
+        
             # 10. 更新doctors表
             logger.info("Updating doctors table...")
             self._update_doctors_table(df, cluster_labels)
-          
+        
             # 11. 保存聚类结果
             result = ClusterResult(
                 task_id=task.task_id,
@@ -580,11 +580,11 @@ class AnalysisService:
                 is_active=True,
                 created_at=datetime.utcnow()
             )
-          
+        
             self.db.add(result)
             self.db.commit()
             self.db.refresh(result)
-          
+        
             # 12. 更新任务状态
             execution_time = (datetime.utcnow() - start_time).total_seconds()
             task.status = 'completed'
@@ -593,10 +593,10 @@ class AnalysisService:
             task.completed_at = datetime.utcnow()
             task.execution_time = execution_time
             self.db.commit()
-          
+        
             logger.info(f"✅ Clustering completed in {execution_time:.2f}s")
             return result
-          
+        
         except Exception as e:
             logger.error(f"❌ Clustering failed: {str(e)}")
             task.status = 'failed'
@@ -626,7 +626,7 @@ class AnalysisService:
         """验证参数有效性"""
         if not 2 <= k <= 10:
             raise AnalysisException("K值必须在2-10之间")
-      
+    
         if features:
             valid_features = ['rfm_frequency', 'rfm_monetary', 'rfm_recency']
             for f in features:
@@ -636,10 +636,10 @@ class AnalysisService:
     def _load_data(self) -> pd.DataFrame:
         """从数据库加载医生数据"""
         doctors = self.db.query(Doctor).all()
-      
+    
         if not doctors:
             raise AnalysisException("数据库中没有医生数据")
-      
+    
         data = []
         for d in doctors:
             data.append({
@@ -648,7 +648,7 @@ class AnalysisService:
                 'rfm_monetary': d.rfm_monetary or 0.0,
                 'rfm_recency': (datetime.utcnow() - d.rfm_recency).days if d.rfm_recency else 365
             })
-      
+    
         df = pd.DataFrame(data)
         logger.info(f"Loaded {len(df)} doctors")
         return df
@@ -657,19 +657,19 @@ class AnalysisService:
         """数据预处理"""
         if not features:
             features = ['rfm_frequency', 'rfm_monetary']
-      
+    
         # 提取特征
         X = df[features].values
-      
+    
         # 处理异常值（使用99.9分位数裁剪）
         for i, feature in enumerate(features):
             percentile_999 = np.percentile(X[:, i], 99.9)
             X[:, i] = np.clip(X[:, i], 0, percentile_999)
             logger.info(f"{feature} clipped at {percentile_999:.2f}")
-      
+    
         # 标准化
         X_scaled = self.scaler.fit_transform(X)
-      
+    
         return X_scaled, features
   
     def _fit_kmeans(self, X: np.ndarray, k: int) -> tuple:
@@ -682,7 +682,7 @@ class AnalysisService:
             algorithm='lloyd'
         )
         labels = kmeans.fit_predict(X)
-      
+    
         logger.info(f"K-Means completed. Cluster sizes: {np.bincount(labels)}")
         return kmeans, labels
   
@@ -691,7 +691,7 @@ class AnalysisService:
         silhouette = silhouette_score(X, labels)
         inertia = KMeans(n_clusters=len(np.unique(labels)), random_state=42).fit(X).inertia_
         davies_bouldin = davies_bouldin_score(X, labels)
-      
+    
         return {
             'silhouette': silhouette,
             'inertia': inertia,
@@ -706,10 +706,10 @@ class AnalysisService:
     ) -> dict:
         """计算每个聚类的统计信息"""
         stats = {}
-      
+    
         for cluster_id in range(k):
             cluster_df = df[df['cluster'] == cluster_id]
-          
+        
             stats[str(cluster_id)] = {
                 'size': len(cluster_df),
                 'size_percentage': round(len(cluster_df) / len(df) * 100, 2),
@@ -721,24 +721,24 @@ class AnalysisService:
                 'min_monetary': round(cluster_df['rfm_monetary'].min(), 2),
                 'max_monetary': round(cluster_df['rfm_monetary'].max(), 2)
             }
-      
+    
         return stats
   
     def _generate_business_labels(self, cluster_stats: dict) -> dict:
         """根据统计特征自动生成业务标签"""
         labels = {}
-      
+    
         # 按平均金额排序
         sorted_clusters = sorted(
             cluster_stats.items(),
             key=lambda x: x[1]['avg_monetary'],
             reverse=True
         )
-      
+    
         for idx, (cluster_id, stats) in enumerate(sorted_clusters):
             avg_m = stats['avg_monetary']
             avg_f = stats['avg_frequency']
-          
+        
             if idx == 0:
                 # 最高金额
                 if avg_f > 20:
@@ -754,7 +754,7 @@ class AnalysisService:
                     labels[cluster_id] = "核心客户"
                 else:
                     labels[cluster_id] = "潜力客户"
-      
+    
         return labels
   
     def _prepare_visualization_data(
@@ -767,7 +767,7 @@ class AnalysisService:
         # 采样1000个点用于前端展示
         sample_size = min(1000, len(df))
         sample_df = df.sample(n=sample_size, random_state=42)
-      
+    
         scatter_data = []
         for _, row in sample_df.iterrows():
             scatter_data.append({
@@ -776,40 +776,40 @@ class AnalysisService:
                 'cluster': int(row['cluster']),
                 'npi': row['npi']
             })
-      
+    
         # 聚类中心（反标准化）
         centers = self.scaler.inverse_transform(kmeans.cluster_centers_)
-      
+    
         viz_data = {
             'scatter_data': scatter_data,
             'cluster_centers': centers.tolist(),
             'total_points': len(df),
             'sample_size': sample_size
         }
-      
+    
         return viz_data
   
     def _update_doctors_table(self, df: pd.DataFrame, cluster_labels: dict):
         """更新doctors表的cluster_id和cluster_label"""
         logger.info("Updating doctors table...")
-      
+    
         for _, row in df.iterrows():
             cluster_id = int(row['cluster'])
             label = cluster_labels.get(str(cluster_id), f"群组{cluster_id}")
-          
+        
             self.db.query(Doctor).filter(Doctor.npi == row['npi']).update({
                 'cluster_id': cluster_id,
                 'cluster_label': label,
                 'updated_at': datetime.utcnow()
             })
-      
+    
         self.db.commit()
         logger.info(f"✓ Updated {len(df)} doctors")
   
     def get_clustering_results(self, cluster_id: int = None) -> list[ClusterResult]:
         """获取聚类结果"""
         query = self.db.query(ClusterResult).filter(ClusterResult.is_active == True)
-      
+    
         if cluster_id:
             return query.filter(ClusterResult.cluster_id == cluster_id).first()
         else:
@@ -823,20 +823,20 @@ class AnalysisService:
         """使用Elbow方法计算最优K值"""
         df = self._load_data()
         X, _ = self._preprocess_data(df, features)
-      
+    
         results = {}
         for k in range(2, max_k + 1):
             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
             labels = kmeans.fit_predict(X)
-          
+        
             results[k] = {
                 'inertia': float(kmeans.inertia_),
                 'silhouette_score': float(silhouette_score(X, labels))
             }
-      
+    
         # 简单推荐逻辑：选择轮廓系数最高的K
         recommended_k = max(results.items(), key=lambda x: x[1]['silhouette_score'])[0]
-      
+    
         return {
             'results': results,
             'recommended_k': recommended_k
@@ -887,7 +887,7 @@ async def perform_clustering(
     """
     try:
         service = AnalysisService(db)
-      
+    
         # 同步执行（小数据量）
         # 如果数据量很大，改为异步：background_tasks.add_task(...)
         result = service.perform_clustering(
@@ -896,12 +896,12 @@ async def perform_clustering(
             task_name=request.task_name,
             user_id=current_user.id
         )
-      
+    
         # 获取任务信息
         task = db.query(AnalysisTask).filter(
             AnalysisTask.result_id == result.cluster_id
         ).first()
-      
+    
         return {
             "task_id": task.task_id,
             "task_name": task.task_name,
@@ -910,7 +910,7 @@ async def perform_clustering(
             "result_id": result.cluster_id,
             "created_at": task.created_at
         }
-      
+    
     except AnalysisException as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1119,7 +1119,7 @@ class ClusteringResponse(BaseModel):
               <span>聚类配置</span>
             </div>
           </template>
-        
+      
           <!-- K值滑块 -->
           <div class="config-section">
             <div class="section-label">
@@ -1140,7 +1140,7 @@ class ClusteringResponse(BaseModel):
               当前K值: <span class="highlight">{{ config.k }}</span>
             </div>
           </div>
-        
+      
           <!-- 特征选择 -->
           <div class="config-section">
             <div class="section-label">特征选择</div>
@@ -1157,7 +1157,7 @@ class ClusteringResponse(BaseModel):
               </el-checkbox>
             </el-checkbox-group>
           </div>
-        
+      
           <!-- 任务名称 -->
           <div class="config-section">
             <div class="section-label">任务名称</div>
@@ -1166,7 +1166,7 @@ class ClusteringResponse(BaseModel):
               placeholder="例如：2024年度医生分群"
             />
           </div>
-        
+      
           <!-- 操作按钮 -->
           <div class="action-buttons">
             <el-button
@@ -1180,7 +1180,7 @@ class ClusteringResponse(BaseModel):
               <el-icon><DataAnalysis /></el-icon>
               {{ analyzing ? '分析中...' : '开始分析' }}
             </el-button>
-          
+        
             <el-button
               size="large"
               @click="showOptimalK = true"
@@ -1189,7 +1189,7 @@ class ClusteringResponse(BaseModel):
               <el-icon><TrendCharts /></el-icon>
               计算最优K
             </el-button>
-          
+        
             <el-button
               size="large"
               @click="viewHistory"
@@ -1201,7 +1201,7 @@ class ClusteringResponse(BaseModel):
           </div>
         </el-card>
       </el-col>
-    
+  
       <!-- 右侧：结果展示 -->
       <el-col :xs="24" :md="16" :lg="18">
         <!-- 分析中状态 -->
@@ -1220,12 +1220,10 @@ class ClusteringResponse(BaseModel):
               <p class="progress-text">{{ progressText }}</p>
             </div>
           </el-card>
-      
+    
 ```
 
-
-
-## Dify Chatflow 集成成功！
+## Dify Chatflow 集成成功
 
 ### ✅ 已完成
 
@@ -1240,6 +1238,7 @@ class ClusteringResponse(BaseModel):
   ```
   user_focus
   ```
+
 * 使用
 
   ```
@@ -1247,6 +1246,7 @@ class ClusteringResponse(BaseModel):
   ```
 
   端点
+
 * ```
   query
   ```
@@ -1261,7 +1261,7 @@ class ClusteringResponse(BaseModel):
   POST /api/v1/reports/generate-stream
   ```
 
-  - SSE 流式响应
+  * SSE 流式响应
 * 自动保存生成的报告
 
 1. **测试验证** ✅

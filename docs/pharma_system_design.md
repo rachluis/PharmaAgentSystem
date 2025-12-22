@@ -609,42 +609,27 @@ CREATE INDEX idx_logs_created ON system_logs(created_at DESC);
 
 #### 3.2.4 AI报告模块 (`/api/v1/reports`)
 
-##### POST /reports/generate
+##### POST /reports/generate-stream
 
-生成AI报告（调用Dify）
+生成AI报告（调用Dify）- SSE流式接口
 
 ```json
 // Request
 {
   "report_type": "cluster_analysis",
   "cluster_id": 1,
-  "custom_prompt": "请重点分析核心客户群的特征和营销策略",
-  "include_visualizations": true
+  "user_prompt": "请重点分析核心客户群的特征和营销策略",
+  "stream": true
 }
 
-// Response (流式)
-{
-  "code": 200,
-  "data": {
-    "report_id": 501,
-    "status": "generating",
-    "stream_url": "/api/v1/reports/501/stream"
-  }
-}
+// Response (Event Stream)
+data: {"event": "message", "answer": "# 核心客户群分析报告\n\n..."}
+data: {"event": "message_end"}
 ```
 
-##### GET /reports//stream
+##### GET /reports/{id}/stream
 
-SSE流式输出报告内容
-
-```
-// Server-Sent Events
-data: {"type": "title", "content": "# 核心客户群分析报告"}
-data: {"type": "section", "content": "## 一、群体特征分析"}
-data: {"type": "text", "content": "该客户群共包含..."}
-data: {"type": "chart", "content": {...}}
-data: {"type": "done"}
-```
+(此接口功能已合并入 `POST /generate-stream` 直接返回流，或作为历史消息回放)
 
 ##### GET /reports
 

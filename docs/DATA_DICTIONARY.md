@@ -65,7 +65,20 @@
 | `size_percentage`    | Float    | 占比         | `size_percentage`    | 0.0 - 1.0 (或百分比)     |
 | `kpi_summary`        | JSON     | 关键指标     | `kpi_summary`        | 含 Avg_M, Avg_F 等统计值 |
 | `visualization_data` | JSON     | 图表数据     | `visualization_data` | ECharts 渲染用数据       |
-| `strategy_focus`     | String   | 策略重心     | `strategy_focus`     | 短句描述                 |
+| `strategy_focus`     | String   | 策略重心     | `strategy_focus`     | 短句或是 Dify 生成的摘要 |
+| `context_for_llm`    | String   | AI 上下文    | `context_for_llm`    | 传递给 LLM 的原始数据    |
+
+### 2.4 AIReports 表 (AI 报告)
+
+| 后端字段               | 数据类型 | 前端显示名称 | 前端属性名             | 备注                     |
+| :--------------------- | :------- | :----------- | :--------------------- | :----------------------- |
+| `report_title`       | String   | 报告标题     | `report_title`       |                          |
+| `report_type`        | String   | 报告类型     | `report_type`        | `cluster_strategy` 等    |
+| `report_content`     | Text     | 内容         | `report_content`     | Markdown 格式            |
+| `report_summary`     | Text     | 摘要         | `report_summary`     |                          |
+| `dify_conversation_id`| String  | 会话 ID      | `dify_conversation_id`| Dify 平台返回的 ID       |
+| `generation_time`    | Float    | 生成耗时     | `generation_time`    | 秒                       |
+| `status`             | String   | 状态         | `status`             | `published`/`draft`    |
 
 ---
 
@@ -75,34 +88,29 @@
 
 ### 3.1 医生管理 (Doctors)
 
-- `GET /doctors` - 分页获取医生列表 (支持筛选: specialty, state, cluster_id)
-
+* `GET /doctors` - 分页获取医生列表 (支持筛选: specialty, state, cluster_id)
 * `GET /doctors/{npi}` - 获取医生详细画像
-* `GET /doctors/statistics` - 获取全局统计数据 (总金额、分布等)
+* `GET /doctors/statistics` - 获取全局统计数据 (已集成服务端缓存)
 
 ### 3.2 认证 (Auth)
 
-- `POST /auth/login` - 登录 (返回 JWT Token)
-
+* `POST /auth/login` - 登录 (返回 JWT Token)
 * `POST /auth/register` - 注册
 * `GET /auth/me` - 获取当前用户信息
 
 ### 3.3 分析任务 (Analysis)
 
-- `POST /analysis/clustering/perform` - 创建并启动新的聚类分析任务
-
+* `POST /analysis/tasks` - 创建并启动新的分析任务
 * `GET /analysis/tasks` - 获取任务列表
-* `GET /analysis/tasks/{id}` - 轮询任务状态
+* `DELETE /analysis/tasks/{id}` - 删除任务
 
 ### 3.4 聚类结果 (Cluster Results)
 
-- `GET /analysis/clustering/results/` - 获取所有聚类结果详情 (用于 Dashboard 展示)
-
-* `GET /analysis/clustering/results/{id}` - 获取特定聚类详情
+* `GET /analysis/tasks/results/list` - 获取所有聚类结果详情 (包含 AI 策略摘要)
 
 ### 3.5 AI 报告 (AI Reports)
 
-- `POST /reports/generate` - 触发 Dify 生成报告
-
-* `GET /reports/{id}/stream` - **SSE** 流式获取生成内容
+* `POST /reports/generate-stream` - **SSE** 流式生成报告
 * `GET /reports` - 报告列表
+* `GET /reports/{id}` - 报告详情
+* `DELETE /reports/{id}` - 删除报告

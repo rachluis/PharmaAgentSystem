@@ -502,7 +502,7 @@ const downloadReport = () => {
   height: calc(100vh - 64px); /* Optimized for typical topbar height */
   display: flex;
   flex-direction: column;
-  background-color: #f6f8fb; /* Light pleasant background */
+  background-color: var(--background);
 }
 
 .analysis-header {

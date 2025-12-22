@@ -142,6 +142,7 @@ PharmaAgentSystem/
   ```
   backend/notebooks/clustering_experiment.ipynb
   ```
+
 * 包含: 数据加载 -> RFM 可视化 -> 预处理 -> K 值选择 (Elbow/Silhouette) -> 3D 聚类图 -> 雷达图 -> 业务解读。
 * **使用** : 您可以在 VS Code 中直接打开此文件运行。
 
@@ -220,33 +221,49 @@ GET /api/analysis/results
 
 * 配置 Dify 知识库和工作流。
 * 编写 Prompt：基于 `cluster_results` 表中的 JSON 数据生成营销策略。
-* 
+*
 
 # 项目进展与开发路线图 (Project Progress & Roadmap)
 
  **项目名称** : 基于多智能体的医药市场画像与策略生成系统
- **当前阶段** : Phase 4 - AI 集成与可视化 (In Progress)
- **最后更新** : 2025-12-21
+ **当前阶段** : Phase 4 - 系统优化与交付 (In Progress)
+ **最后更新** : 2025-12-23
 
 ## 1. 项目概况与状态 (Status Overview)
 
 ### ✅ 已完成工作 (Completed)
 
-1. **后端架构** : FastAPI + SQLite 骨架搭建完毕。
-2. **数据 ETL** : 完成 73万+ 医生数据的清洗入库。
-3. **核心算法** : K-Means 聚类服务已封装。
-4. **业务功能** : 医生管理 CRUD、批量导入导出、个人中心设计。
-5. **AI 策略服务** :
+1. **基础架构** : FastAPI + SQLite 后端，Vue3 + Element Plus 前端，数据库模型设计完毕。
+2. **数据清洗 (ETL)** : 成功处理千万级 CMS 数据，入库 73.8 万医生画像。
+3. **K-Means 聚类** : 核心算法封装，实现了基于 RFM 模型的自动分群。
+4. **前端功能** :
+   * [x] **Dashboard**: 首页数据看板 (带缓存优化)。
+   * [x] **Analysis**: 聚类分析页面，集成 3D 散点图与 KPI 卡片。
+   * [x] **AI Reports**: 集成 Dify，支持 SSE 流式生成 markdown 报告。
+   * [x] **UI Polish**: 实现了 "Modern Slate" 深色模式，定制了图表配色。
+5. **性能优化** :
+   * [x] 数据库添加索引 (`specialty`, `state`).
+   * [x] Dashboard 统计接口添加内存缓存 (1小时 TTL)。
+6. **业务流程** : 完整的 "数据导入 -> 聚类分析 -> AI 策略生成" 闭环跑通。
 
-* 实现 SSE 流式接口 (`generate-stream`)。
-* 完成前端 AI 对话弹窗与 Markdown 实时渲染。
-* 实现 Mock 模式，无 Key 也能演示。
+### 🚧 进行中 / 待办 (Pending)
 
-### 🚧 待启动 (Pending)
+* **[Current Action]** 文档体系完善 (Data Dictionary, System Design)。
+* **[Next]** 系统日志模块 (System Logs) 开发。
+* **[Next]** 最终验收测试与部署指南编写。
 
-* **[Current Action]** Dify 平台配置 (Prompt 编排 & API Key 获取)。
-* **[Next]** 聚类结果可视化 (3D 散点图、雷达图)。
-* **[Next]** 首页 Dashboard 综合看板。
+## 2. 关键技术点回顾
+
+### 2.1 性能优化亮点
+
+* **大数据处理**: 使用 Chunk 读取处理 1500万+ 行数据，内存占用可控。
+* **查询加速**: 针对 Dashboard 高频查询字段 (`state`, `specialty`) 建立了 B-Tree 索引。
+* **缓存策略**: 对聚合查询 `/statistics` 实施应用层缓存，响应时间从 ~2s 降至 <10ms。
+
+### 2.2 AI 集成
+
+* **Dify 工作流**: 通过 SSE (Server-Sent Events) 实现打字机效果。
+* **Prompt 工程**: 动态注入 Cluster KPI 上下文，确保生成的策略具有针对性。
 
 ## 2. Dify 集成指南
 
