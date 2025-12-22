@@ -182,11 +182,29 @@ async def get_doctors(
     }
 
 
+import time
+
+# ... existing code ...
+
+# Simple in-memory cache
+# Structure: {'timestamp': float, 'data': dict, 'ttl': int}
+_stats_cache = {
+    "timestamp": 0.0,
+    "data": None,
+    "ttl": 3600  # 1 hour cache
+}
+
 @router.get("/statistics", response_model=DoctorStatistics)
 async def get_statistics(db: Session = Depends(get_db)):
     """
     Get aggregate statistics for all doctors.
+    Includes caching mechanism (TTL=1hr) to improve performance.
     """
+    # Check cache
+    current_time = time.time()
+    if _stats_cache["data"] and (current_time - _stats_cache["timestamp"] < _stats_cache["ttl"]):
+        return _stats_cache["data"]
+
     # Basic stats
     total_doctors = db.query(Doctor).count()
     total_monetary = db.query(func.sum(Doctor.monetary)).scalar() or 0
@@ -213,7 +231,7 @@ async def get_statistics(db: Session = Depends(get_db)):
         .limit(10)\
         .all()
     
-    return {
+    result = {
         "total_doctors": total_doctors,
         "total_monetary": float(total_monetary),
         "avg_monetary": float(avg_monetary),
@@ -221,6 +239,12 @@ async def get_statistics(db: Session = Depends(get_db)):
         "specialty_distribution": {s[0]: s[1] for s in specialty_dist if s[0]},
         "state_distribution": {s[0]: s[1] for s in state_dist if s[0]}
     }
+    
+    # Update cache
+    _stats_cache["timestamp"] = current_time
+    _stats_cache["data"] = result
+    
+    return result
 
 
 @router.get("/specialties")

@@ -57,8 +57,8 @@ class Doctor(Base):
     last_name = Column(String(100), nullable=True, comment="医生姓")
     full_name = Column(String(200), nullable=True, comment="全名 (first_name + last_name)")
     primary_type = Column(String(100), nullable=True, comment="医生类型 (Medical Doctor, DO, etc.)")
-    specialty = Column(String(200), nullable=True, comment="专科分类")
-    state = Column(String(10), nullable=True, comment="所在州")
+    specialty = Column(String(200), nullable=True, index=True, comment="专科分类")
+    state = Column(String(10), nullable=True, index=True, comment="所在州")
     city = Column(String(100), nullable=True, comment="城市")
     
     # RFM Values (computed from PaymentRecords)
