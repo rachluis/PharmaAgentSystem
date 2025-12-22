@@ -70,6 +70,7 @@
                   class="custom-input"
                   :class="{ 'is-error': loginError }"
                   @focus="clearError"
+                  @keyup.enter="handleLogin"
                 >
                   <template #prefix>
                     <el-icon><Lock /></el-icon>
@@ -77,6 +78,12 @@
                 </el-input>
               </div>
             </el-form-item>
+
+            <!-- 错误提示 -->
+            <div v-if="loginError && errorMessage" class="error-message">
+              <el-icon class="error-icon"><Warning /></el-icon>
+              <span>{{ errorMessage }}</span>
+            </div>
 
             <div class="form-options">
               <el-checkbox v-model="rememberMe">记住我</el-checkbox>
@@ -88,10 +95,16 @@
                 type="primary"
                 class="login-btn"
                 :loading="loading"
+                :disabled="loading"
                 @click="handleLogin"
               >
-                {{ loading ? '登录中...' : '立即登录' }}
-                <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+                <template v-if="!loading">
+                  <span>立即登录</span>
+                  <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+                </template>
+                <template v-else>
+                  <span>登录中...</span>
+                </template>
               </el-button>
             </el-form-item>
 
@@ -203,18 +216,22 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { reactive, ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { 
   User, Lock, DataAnalysis, Monitor, 
-  TrendCharts, Cpu, ArrowRight, Message, Postcard, Iphone
+  TrendCharts, Cpu, ArrowRight, Message, Postcard, Iphone, Warning
 } from '@element-plus/icons-vue'
-import request from '@/api/request'
+import { login, register, type RegisterRequest } from '@/api/auth'
+import { useUserStore } from '@/stores/user'
 import PasswordStrength from '@/components/PasswordStrength.vue'
 
 const router = useRouter()
+const route = useRoute()
+const userStore = useUserStore()
+
 const formRef = ref<FormInstance>()
 const registerFormRef = ref<FormInstance>()
 const forgotFormRef = ref<FormInstance>()
@@ -227,8 +244,22 @@ const showRegister = ref(false)
 const showForgotPassword = ref(false)
 const rememberMe = ref(false)
 const loginError = ref(false)
+const errorMessage = ref('')
 const shakeField = ref('')
 const forgotStep = ref(0)
+
+// 初始化：检查是否已登录
+onMounted(() => {
+  if (userStore.isAuthenticated) {
+    router.push(route.query.redirect as string || '/dashboard')
+  }
+  
+  // 恢复记住我状态
+  rememberMe.value = userStore.rememberMe
+  if (rememberMe.value && userStore.user) {
+    form.username = userStore.user.username
+  }
+})
 
 // Features list
 const features = [
@@ -321,6 +352,7 @@ const resetRules = {
 // Methods
 const clearError = () => {
   loginError.value = false
+  errorMessage.value = ''
   shakeField.value = ''
 }
 
@@ -346,37 +378,57 @@ const handleLogin = async () => {
   
   loading.value = true
   loginError.value = false
+  errorMessage.value = ''
   
   try {
-    const formData = new URLSearchParams()
-    formData.append('username', form.username)
-    formData.append('password', form.password)
-    
-    const res: any = await request.post('/auth/login', formData, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    const res = await login({
+      username: form.username,
+      password: form.password
     })
     
-    localStorage.setItem('token', res.access_token)
+    // 设置记住我
+    userStore.setRememberMe(rememberMe.value)
+    
+    // 保存 token
+    userStore.setToken(res.access_token)
+    
+    // 如果后端返回了用户信息，直接使用；否则获取
     if (res.user) {
-      localStorage.setItem('user', JSON.stringify(res.user))
+      userStore.setUser(res.user)
+    } else {
+      // 获取用户信息
+      await userStore.fetchUserInfo()
     }
     
     ElMessage.success({
-      message: '登录成功，欢迎回来！',
+      message: `登录成功，欢迎回来，${userStore.userName}！`,
       duration: 2000,
       showClose: true
     })
     
+    // 跳转到目标页面或默认页面
+    const redirect = route.query.redirect as string || '/dashboard'
     setTimeout(() => {
-      router.push('/dashboard')
+      router.push(redirect)
     }, 500)
     
   } catch (error: any) {
     console.error('Login failed:', error)
     loginError.value = true
+    
+    // 更详细的错误提示
+    if (error.response?.status === 401) {
+      errorMessage.value = '用户名或密码错误，请重试'
+    } else if (error.response?.status === 403) {
+      errorMessage.value = '账号已被禁用，请联系管理员'
+    } else if (error.response?.status === 429) {
+      errorMessage.value = '登录尝试过于频繁，请稍后再试'
+    } else {
+      errorMessage.value = error.response?.data?.detail || error.message || '登录失败，请检查网络连接'
+    }
+    
     triggerShake('username')
     triggerShake('password')
-    // Error handling is done in request interceptor usually, but here we add visual feedback
   } finally {
     loading.value = false
   }
@@ -388,20 +440,46 @@ const handleRegister = async () => {
   
   registerLoading.value = true
   try {
-    await request.post('/auth/register', {
+    const registerData: RegisterRequest = {
       username: registerForm.username,
       email: registerForm.email,
-      full_name: registerForm.full_name,
-      phone: registerForm.phone,
-      bio: registerForm.bio,
       password: registerForm.password
+    }
+    
+    if (registerForm.full_name) registerData.full_name = registerForm.full_name
+    if (registerForm.phone) registerData.phone = registerForm.phone
+    if (registerForm.bio) registerData.bio = registerForm.bio
+    
+    await register(registerData)
+    
+    ElMessage.success({
+      message: '注册成功！请使用新账号登录',
+      duration: 3000
     })
-    ElMessage.success('注册成功，请使用新账号登录')
+    
     showRegister.value = false
+    
+    // 自动填充用户名
     form.username = registerForm.username
     form.password = ''
+    
+    // 重置注册表单
+    registerFormRef.value?.resetFields()
+    Object.assign(registerForm, {
+      username: '',
+      email: '',
+      full_name: '',
+      phone: '',
+      bio: '',
+      password: '',
+      confirmPassword: '',
+      agreement: false
+    })
+    
   } catch (error: any) {
     console.error('Register failed:', error)
+    const errorMsg = error.response?.data?.detail || error.message || '注册失败，请重试'
+    ElMessage.error(errorMsg)
   } finally {
     registerLoading.value = false
   }
@@ -639,9 +717,15 @@ const handleForgotNext = async () => {
 :deep(.el-input__wrapper) {
   background-color: var(--secondary);
   box-shadow: none !important;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   transition: all 0.3s ease;
   padding: 8px 11px;
+  border-radius: 8px;
+}
+
+:deep(.el-input__wrapper:hover) {
+  border-color: var(--primary);
+  background-color: var(--card);
 }
 
 :deep(.el-input__wrapper.is-focus) {
@@ -652,8 +736,13 @@ const handleForgotNext = async () => {
 
 /* Specific error style */
 :deep(.is-error .el-input__wrapper) {
-  border-color: var(--destructive);
+  border-color: #ef4444;
   background-color: #fef2f2;
+  animation: shake 0.5s cubic-bezier(.36,.07,.19,.97);
+}
+
+:deep(.is-error .el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1) !important;
 }
 
 .input-wrapper {
@@ -665,6 +754,16 @@ const handleForgotNext = async () => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
+  font-size: 14px;
+}
+
+.form-options :deep(.el-checkbox__label) {
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+
+.form-options :deep(.el-link) {
+  font-size: 14px;
 }
 
 .login-btn {
@@ -674,12 +773,32 @@ const handleForgotNext = async () => {
   font-weight: 600;
   border: none;
   border-radius: 8px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
 }
 
-.login-btn:hover {
+.login-btn:not(:disabled):hover {
   transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+}
+
+.login-btn:not(:disabled):active {
+  transform: translateY(0);
+}
+
+.login-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.login-btn .el-icon--right {
+  margin-left: 8px;
+  transition: transform 0.3s ease;
+}
+
+.login-btn:not(:disabled):hover .el-icon--right {
+  transform: translateX(4px);
 }
 
 .form-footer {
@@ -687,6 +806,37 @@ const handleForgotNext = async () => {
   margin-top: 24px;
   font-size: 14px;
   color: var(--muted-foreground);
+}
+
+/* Error Message */
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #dc2626;
+  font-size: 14px;
+  animation: slideDown 0.3s ease;
+}
+
+.error-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes slideInLeft {

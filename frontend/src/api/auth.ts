@@ -26,7 +26,50 @@ export interface PasswordChange {
     new_password: string
 }
 
+export interface LoginRequest {
+    username: string
+    password: string
+}
+
+export interface LoginResponse {
+    access_token: string
+    token_type: string
+    user?: User
+}
+
+export interface RegisterRequest {
+    username: string
+    email: string
+    password: string
+    full_name?: string
+    phone?: string
+    bio?: string
+}
+
 // API Methods
+export const login = (data: LoginRequest) => {
+    const formData = new URLSearchParams()
+    formData.append('username', data.username)
+    formData.append('password', data.password)
+    
+    return request<LoginResponse, LoginResponse>({
+        url: '/auth/login',
+        method: 'post',
+        data: formData,
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+    })
+}
+
+export const register = (data: RegisterRequest) => {
+    return request<any, User>({
+        url: '/auth/register',
+        method: 'post',
+        data
+    })
+}
+
 export const getProfile = () => {
     return request<any, User>({
         url: '/auth/me',

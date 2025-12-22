@@ -27,6 +27,7 @@
 - [分析功能开发指南](./03-development/developer_guide_analysis.md) - 分析功能开发说明
 - [设置模块设计](./03-development/Setting_module_design.md) - 系统设置模块设计
 - [系统日志设计](./03-development/system_logs_design.md) - 日志系统设计
+- [多用户权限管理设计](./03-development/multi_user_permission_design.md) - 多租户权限与数据访问控制
 
 #### 前端开发
 - [认证系统设计](./03-development/frontend/auth_system_design.md) - 前端认证与权限系统
@@ -45,6 +46,7 @@
 
 - [开发计划](./06-project-management/Development_Plan.md) - 项目开发计划
 - [项目进度](./06-project-management/Project_Progress.md) - 项目进度跟踪
+- [迭代路线图](./06-project-management/iteration_roadmap.md) - 功能迭代开发路线图
 
 ### 📄 [学术文档](./07-academic/)
 论文和学术相关文档
