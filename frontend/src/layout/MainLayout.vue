@@ -158,7 +158,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { 
   Odometer, DataLine, User, Document, ArrowDown,
   Setting, Fold, Expand, Monitor, SwitchButton,
-  FolderOpened, Tools, Sunny, Moon, Lock
+  Tools, Sunny, Moon, Lock
 } from "@element-plus/icons-vue"
 import { ElMessage } from 'element-plus'
 import { useThemeStore } from '@/stores/theme'

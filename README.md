@@ -53,3 +53,12 @@ npm run dev
 - **市场分析**: K-Means 聚类分析，识别核心客户群体。
 - **系统日志**: 全面的登录与操作日志监控 (`/system/logs`)。
 - **个人中心**: 支持头像上传及个人信息管理。
+
+## 📚 文档
+
+详细文档请查看 [文档中心](./docs/README.md)：
+
+- [快速开始](./docs/01-getting-started/quick_start.md)
+- [系统架构](./docs/02-architecture/system_architecture_and_workflow.md)
+- [开发指南](./docs/03-development/developer_guide_analysis.md)
+- [数据字典](./docs/04-data/DATA_DICTIONARY.md)

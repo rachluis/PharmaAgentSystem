@@ -248,7 +248,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { Search, Plus, Edit, Delete, Location, Download, Upload, Refresh } from '@element-plus/icons-vue'
+import { Search, Plus, Location, Download, Upload, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { 
