@@ -1,0 +1,72 @@
+【任务1】读取数据库中的聚类结果
+============================================================
+
+SQL-1：查看所有聚类结果批次
+------------------------------
+cluster_id: 0
+cluster_name: High-Value Core (VIP)
+algorithm: k-means
+silhouette_score: None
+inertia: None
+kpi_summary: {"avg_recency_days": 209.52, "avg_frequency": 43.84, "avg_monetary": 10462.26, "max_monetary": 91082706.03, "min_monetary": 130.68, "top_specialty": "Physician Assistant"}
+------------------------------
+cluster_id: 1
+cluster_name: Potential Growth
+algorithm: k-means
+silhouette_score: None
+inertia: None
+kpi_summary: {"avg_recency_days": 428.49, "avg_frequency": 1.67, "avg_monetary": 156.02, "max_monetary": 432646.53, "min_monetary": 0.37, "top_specialty": "Internal Medicine"}
+------------------------------
+cluster_id: 2
+cluster_name: Low-Engagement
+algorithm: k-means
+silhouette_score: None
+inertia: None
+kpi_summary: {"avg_recency_days": 248.37, "avg_frequency": 3.99, "avg_monetary": 191.8, "max_monetary": 18110.83, "min_monetary": 0.33, "top_specialty": "Physician Assistant"}
+------------------------------
+cluster_id: 3
+cluster_name: K-Means Analysis (K=5) Result (Optimized)
+algorithm: minibatch-kmeans
+silhouette_score: 0.3656123916519033
+inertia: 437357.64740637626
+kpi_summary: "{\"0\": {\"count\": 183813, \"percentage\": 24.88, \"means\": {\"recency_days\": 258.52797136219965, \"frequency\": 1.8728218352347223, \"monetary\": 64.58968429871663}}, \"1\": {\"count\": 149603, \"percentage\": 20.25, \"means\": {\"recency_days\": 202.72430365701223, \"frequency\": 59.42043274533265, \"monetary\": 15466.265747277796}}, \"2\": {\"count\": 113140, \"percentage\": 15.31, \"means\": {\"recency_days\": 455.5369365388015, \"frequency\": 1.2246331978080254, \"monetary\": 45.15916413293265}}, \"3\": {\"count\": 213635, \"percentage\": 28.92, \"means\": {\"recency_days\": 225.6722072694081, \"frequency\": 9.562346993704216, \"monetary\": 530.5349428230393}}, \"4\": {\"count\": 78581, \"percentage\": 10.64, \"means\": {\"recency_days\": 376.37299092655985, \"frequency\": 3.4214759292958856, \"monetary\": 653.9711124826613}}, \"metrics\": {\"inertia\": 437357.64740637626, \"silhouette\": 0.3656123916519033, \"davies_bouldin\": 0.9440790952656849, \"calinski_harabasz\": 744906.2105642764}, \"clustering_time_seconds\": 2.668373, \"data_size\": 738772, \"optimizations_applied\": [\"Recency\\u53cd\\u8f6c\", \"Log\\u53d8\\u6362\", \"MiniBatchKMeans\", \"\\u591a\\u7ef4\\u5ea6\\u8d28\\u91cf\\u8bc4\\u4f30\"]}"
+------------------------------
+
+SQL-2：查看各群组医生数量分布
+------------------------------
+cluster_id   | cluster_label             | count    | pct(%)   | avg_monetary    | avg_frequency   | avg_recency    
+--------------------------------------------------------------------------------------------------------------
+0            | Low-Engagement            | 183813   | 24.88    | 64.59           | 1.87            | 258.53         
+1            | High-Value Core (VIP)     | 149603   | 20.25    | 15466.27        | 59.42           | 202.72         
+2            | Low-Engagement            | 113140   | 15.31    | 45.16           | 1.22            | 455.54         
+3            | Regular Customers         | 213635   | 28.92    | 530.53          | 9.56            | 225.67         
+4            | Low-Engagement            | 78581    | 10.64    | 653.97          | 3.42            | 376.37         
+
+SQL-3：查看RFM原始分布统计（验证长尾特征）
+------------------------------
+Monetary Min  : 0.0
+Monetary Max  : 91082706.03
+Monetary Mean : 3377.9144914066974
+Frequency Min : 0
+Frequency Max : 1147
+Frequency Mean: 15.815404731900056
+Total Records : 738773
+
+SQL-4：查看AI报告表中的性能数据
+------------------------------
+report_id  | generation_time(s)   | status          | created_at               
+--------------------------------------------------------------------------------
+1          | 72.41905236244202    | published       | 2025-12-21 08:41:15.680145
+
+【任务2】读取日志或控制台输出
+============================================================
+
+查询 cluster_results 表 kpi_summary 内的 clustering_time_seconds：
+Cluster ID 0 - kpi_summary: {"avg_recency_days": 209.52, "avg_frequency": 43.84, "avg_monetary": 10462.26, "max_monetary": 91082706.03, "min_monetary": 130.68, "top_specialty": "Physician Assistant"}
+Cluster ID 1 - kpi_summary: {"avg_recency_days": 428.49, "avg_frequency": 1.67, "avg_monetary": 156.02, "max_monetary": 432646.53, "min_monetary": 0.37, "top_specialty": "Internal Medicine"}
+Cluster ID 2 - kpi_summary: {"avg_recency_days": 248.37, "avg_frequency": 3.99, "avg_monetary": 191.8, "max_monetary": 18110.83, "min_monetary": 0.33, "top_specialty": "Physician Assistant"}
+
+【任务3】读取 Dify 工作流配置
+============================================================
+
+经过全库扫描项目目录（使用 find 命令模式匹配 *.yml, *.yaml, *.json），未发现任何包含 Dify 节点或工作流导出的 DSL/YAML 配置文件。目前系统中是通过 `dify_service.py` 中的 `httpx.AsyncClient` 直接调用了云端的 Dify Chatflow/Workflow API（接口路径 `/chat-messages`），Dify Agent 节点的编排逻辑配置保存在外部 Dify 平台的云端环境内，未保存在本地代码库中。

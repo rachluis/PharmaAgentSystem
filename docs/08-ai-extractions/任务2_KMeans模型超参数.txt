@@ -1,0 +1,41 @@
+任务2：提取K-Means模块的真实超参数
+
+1. 代码文件路径：
+`backend/app/services/analysis_service_optimized.py`
+
+2. 函数名称：
+`perform_clustering`, `_generate_label`
+
+3. 关键代码片段：
+```python
+# StandardScaler的调用方式
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(df_clean[model_features])
+
+# 实际使用的 K-Means 超参数
+if use_minibatch and len(df_clean) > 50000:
+    kmeans = MiniBatchKMeans(
+        n_clusters=k,          # K=4
+        batch_size=10000,      # 每次迭代梯度下降的批次大小
+        random_state=42,       # 固定随机种子确保结果可复现
+        n_init=10,             # kmeans++随机初始化运行次数
+        max_iter=300,          # 最大收敛迭代常数
+        verbose=0
+    )
+
+# 业务群组语义标签映射规则 (基于_generate_label的判断阈值条件)
+# m, f, r 为群组均值；gm, gf, gr 为全局均值
+if m > gm * 2 and f > gf * 1.5:
+    return "High-Value Core (VIP)"    # 货币贡献超全局均值200%且频次超全局均值150%
+elif m > gm * 1.5 and f > gf:
+    return "Growth Potential"         # 货币贡献超150%且频次超均值
+elif f < gf * 0.5 and m < gm * 0.5:
+    return "Low-Engagement"           # 频次与金额均跌破全局均值一半
+elif r < gr * 0.7:  
+    return "Dormant Customers"        # 近期活跃度严重恶化
+else:
+    return "Regular Customers"
+```
+
+4. 可直接引用进论文的中文描述语句：
+为了应对高达73万级别体量所带来的K-Means全局矩阵距离运算的高延迟算力灾难，工程后台对算法类进行了策略降级优化。当探知被操作扫描数据样本量超过50,000条上限警戒点时，后端控制网关（`perform_clustering`）将强行抛弃高耗时的全量`KMeans`，转为实例化基于采样估算的优化变体模型`MiniBatchKMeans`算子池。在模型挂载前，算法使用固定随机种子发生器（`random_state=42`），将最关键的寻心初始轮设为10轮循环（`n_init=10`避开局部伪底域），收敛迭代封顶于300步（`max_iter=300`），每次抽出10,000条样本切片（`batch_size=10000`）快速校准簇重力中心位置。并且，根据内置的映射条件表：如果某组聚出的特征其均值同时满足金额`Monetary`大于大盘全局平均值200%及活动频次`Frequency`高于全局基线150%时，会被自动化系统直接打上最高价值战略资源的红标定义“High-Value Core (VIP)”身份记号。

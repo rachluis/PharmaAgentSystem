@@ -1,108 +1,34 @@
 # PharmaAgent System 文档中心
 
-**最后更新**: 2025-01-XX  
-**文档版本**: 2.0
+欢迎使用 PharmaAgent System 文档中心。为了保持项目根目录整洁，所有技术文档、数据提取报告及学术论文原稿统一归档于本目录下。
 
----
+## 目录结构索引
 
-## 📚 文档导航
+### 核心系统说明
+* [01-getting-started](./01-getting-started/) - 快速入门与环境搭建指南
+* [02-architecture](./02-architecture/) - 系统架构设计与交互工作流
+* [03-development](./03-development/) - 后端服务、前端组件与聚类服务的开发指南
+* [04-data](./04-data/) - 数据流处理与数据字典定义
+* [05-api](./05-api/) - 接口层相关设计说明
+* [06-project-management](./06-project-management/) - 部署实施记录与项目管理文档
 
-### 🚀 [快速开始](./01-getting-started/)
-入门指南和部署文档
+### 学术与补充材料 (Newly Consolidated)
+* **[08-ai-extractions](./08-ai-extractions/)** - 核心底层数据真实提取与记录（第五章/附录所需）
+  - `任务1_ETL模块实现细节.txt`
+  - `任务2_KMeans模型超参数.txt`
+  - `任务3_Prompt_Bridging真实模板.txt`
+  - `任务4_数据库模型字段.txt`
+  - `任务5_系统性能量化测试数据.txt`
+  - `任务6_数据库真实查询与性能指标.txt`
+  - `任务7_最新AI策略报告完整原文.md`
+  - `任务8_最优K值搜索评估结果(K2到K6).txt`
+  - `五大核心代码文件_完整提取.txt`
+  - `dify LLM内容.txt` 等相关分析流水
 
-- [快速启动指南](./01-getting-started/quick_start.md) - 系统快速启动步骤
-- [部署指南](./01-getting-started/deployment_guide.md) - 生产环境部署说明
-- [公开访问指南](./01-getting-started/public_access_guide.md) - 系统公开访问配置
+* **[09-academic](./09-academic/)** - 论文撰写区（初稿、大纲与指导规范）
+  - `第五章、第六章.txt`
+  - `论文初稿1.md`
+  - `论文要求.txt`
+  - `paper prompt.md`
 
-### 🏗️ [系统架构](./02-architecture/)
-系统设计和技术架构文档
-
-- [系统架构与工作流](./02-architecture/system_architecture_and_workflow.md) - 整体架构设计
-- [系统设计文档](./02-architecture/pharma_system_design.md) - 详细系统设计
-- [聚类分析设计](./02-architecture/clustering_analysis_design.md) - K-Means 聚类算法设计
-
-### 💻 [开发文档](./03-development/)
-开发指南和模块设计文档
-
-- [分析功能开发指南](./03-development/developer_guide_analysis.md) - 分析功能开发说明
-- [设置模块设计](./03-development/Setting_module_design.md) - 系统设置模块设计
-- [系统日志设计](./03-development/system_logs_design.md) - 日志系统设计
-- [多用户权限管理设计](./03-development/multi_user_permission_design.md) - 多租户权限与数据访问控制
-
-#### 前端开发
-- [认证系统设计](./03-development/frontend/auth_system_design.md) - 前端认证与权限系统
-
-#### 后端开发
-- (后端开发文档，如有)
-
-### 📊 [数据文档](./04-data/)
-数据字典和数据处理文档
-
-- [数据字典](./04-data/DATA_DICTIONARY.md) - 数据库字段映射与 API 规范
-- [数据处理文档](./04-data/DataProcess/) - 数据导入、清洗、分析相关文档
-
-### 📈 [项目管理](./06-project-management/)
-项目计划和进度跟踪
-
-- [开发计划](./06-project-management/Development_Plan.md) - 项目开发计划
-- [项目进度](./06-project-management/Project_Progress.md) - 项目进度跟踪
-- [迭代路线图](./06-project-management/iteration_roadmap.md) - 功能迭代开发路线图
-
-### 📄 [学术文档](./07-academic/)
-论文和学术相关文档
-
-- [论文](./07-academic/Paper.md) - 项目论文
-- [论文 PDF](./07-academic/Paper.pdf) - 论文 PDF 版本
-
-### 📦 [归档文档](./archive/)
-历史文档和实验性内容
-
-- [开发命令](./archive/command/) - 开发过程中的命令和提示词
-- [实验性 Notebook](./archive/notebooks/) - 数据分析和实验性 Jupyter Notebook
-
----
-
-## 🔍 快速查找
-
-### 按角色查找
-
-**👨‍💼 项目经理/产品经理**
-- [开发计划](./06-project-management/Development_Plan.md)
-- [项目进度](./06-project-management/Project_Progress.md)
-- [系统架构](./02-architecture/system_architecture_and_workflow.md)
-
-**👨‍💻 开发人员**
-- [快速启动](./01-getting-started/quick_start.md)
-- [开发指南](./03-development/developer_guide_analysis.md)
-- [数据字典](./04-data/DATA_DICTIONARY.md)
-
-**🔧 运维人员**
-- [部署指南](./01-getting-started/deployment_guide.md)
-- [公开访问指南](./01-getting-started/public_access_guide.md)
-
-**📊 数据分析师**
-- [数据处理文档](./04-data/DataProcess/)
-- [聚类分析设计](./02-architecture/clustering_analysis_design.md)
-
----
-
-## 📝 文档维护
-
-### 文档状态说明
-
-- ✅ **Active** - 当前有效文档
-- 📦 **Archived** - 已归档的历史文档
-- ⚠️ **Deprecated** - 已弃用但保留参考
-
-### 更新日志
-
-- **2025-01-XX**: 文档结构重组，按功能模块分类整理
-
----
-
-## 🔗 相关链接
-
-- [项目根目录 README](../README.md)
-- [后端 README](../backend/README.md)
-- [前端 README](../frontend/README.md)
-
+*(注意：原 `07-academic` 可能存在旧版本的论文文件，请以 `09-academic` 中最新的提取稿为准。)*

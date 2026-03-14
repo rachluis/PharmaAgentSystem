@@ -1,0 +1,1580 @@
+﻿============================================================
+文件路径: E:\PharmaAgentSystem\backend\scripts\etl_process.py
+总行数: 352
+============================================================
+"""
+ETL Process Script for CMS Open Payments Data
+
+Processes large CSV file (15M+ rows) using chunked reading to:
+1. Filter: Keep only Physicians, exclude Teaching Hospitals, drop null NPIs
+2. Clean: Convert dates, validate amounts
+3. Aggregate: Calculate RFM values in-memory
+4. Load: Batch insert into SQLite database
+
+Usage:
+    python -m scripts.etl_process
+"""
+
+import sys
+import os
+from pathlib import Path
+from datetime import datetime, date
+from typing import Dict, Any
+import time
+
+import pandas as pd
+from tqdm import tqdm
+from sqlalchemy.orm import Session
+
+# Add parent directory to path to import app modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.database import SessionLocal, engine
+from app.models import Doctor, PaymentRecord, Base
+from app.config import get_settings
+
+# ============== Configuration ==============
+
+settings = get_settings()
+
+# Source CSV file path
+CSV_FILE_PATH = settings.raw_data_path
+
+# Processing parameters
+CHUNK_SIZE = 50000  # Process 50k rows at a time
+IMPORT_DETAILS = False  # Set to True to import PaymentRecord details (WARNING: 15M rows!)
+
+# Reference date for Recency calculation (use latest date in dataset or current date)
+REFERENCE_DATE = datetime(2025, 6, 30).date()  # Based on Payment_Publication_Date
+
+# ============== Core Fields Mapping ==============
+
+CORE_FIELDS = [
+    'Covered_Recipient_NPI',
+    'Covered_Recipient_First_Name',
+    'Covered_Recipient_Last_Name',
+    'Covered_Recipient_Primary_Type_1',
+    'Covered_Recipient_Specialty_1',
+    'Recipient_State',
+    'Total_Amount_of_Payment_USDollars',
+    'Date_of_Payment',
+    'Nature_of_Payment_or_Transfer_of_Value',
+    'Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_Name',
+    'Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_1',
+    'Covered_Recipient_Type'  # For filtering
+]
+
+
+class ETLProcessor:
+    """ETL Processor for CMS Open Payments data."""
+    
+    def __init__(self):
+        self.doctor_stats: Dict[str, Dict[str, Any]] = {}
+        self.total_rows = 0
+        self.valid_rows = 0
+        self.filtered_rows = 0
+        self.error_rows = 0
+        self.payment_batch = []
+        
+    def filter_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter chunk to keep only valid physician records.
+        
+        Filters:
+        1. Keep only Physicians (exclude Teaching Hospitals)
+        2. Drop rows with null NPI
+        3. Keep only rows with Primary_Type containing "Physician"
+        """
+        initial_count = len(chunk)
+        
+        # Filter 1: Exclude Teaching Hospitals (keep only individual recipients)
+        chunk = chunk[
+            chunk['Covered_Recipient_Type'].isin([
+                'Covered Recipient Physician',
+                'Covered Recipient Non-Physician Practitioner'
+            ])
+        ]
+        
+        # Filter 2: Drop null NPIs
+        chunk = chunk.dropna(subset=['Covered_Recipient_NPI'])
+        
+        # Filter 3: Keep only Physicians (Primary_Type contains "Physician")
+        # Note: Some Non-Physician Practitioners might be valuable too, adjust as needed
+        chunk = chunk[
+            chunk['Covered_Recipient_Primary_Type_1'].str.contains(
+                'Physician|Doctor|Osteopathy',
+                case=False,
+                na=False
+            )
+        ]
+        
+        filtered_count = initial_count - len(chunk)
+        self.filtered_rows += filtered_count
+        
+        return chunk
+    
+    def clean_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
+        """
+        Clean and transform data.
+        
+        Transformations:
+        1. Convert Date_of_Payment to datetime
+        2. Ensure Total_Amount is float
+        3. Handle missing values
+        """
+        # Convert date (format: MM/DD/YYYY)
+        try:
+            chunk['Date_of_Payment'] = pd.to_datetime(
+                chunk['Date_of_Payment'],
+                format='%m/%d/%Y',
+                errors='coerce'
+            )
+        except Exception as e:
+            print(f"Warning: Date conversion error: {e}")
+            chunk['Date_of_Payment'] = pd.to_datetime(chunk['Date_of_Payment'], errors='coerce')
+        
+        # Ensure amount is float
+        chunk['Total_Amount_of_Payment_USDollars'] = pd.to_numeric(
+            chunk['Total_Amount_of_Payment_USDollars'],
+            errors='coerce'
+        ).fillna(0.0)
+        
+        # Convert NPI to string (remove .0 from float representation)
+        chunk['Covered_Recipient_NPI'] = chunk['Covered_Recipient_NPI'].astype(int).astype(str)
+        
+        # Drop rows with invalid dates
+        chunk = chunk.dropna(subset=['Date_of_Payment'])
+
+        # Clean Specialty: Remove redundant prefix (keep content after first '|')
+        # Example: 'Allopathic & Osteopathic Physicians|Internal Medicine|Cardiovascular Disease' -> 'Internal Medicine|Cardiovascular Disease'
+        if 'Covered_Recipient_Specialty_1' in chunk.columns:
+            chunk['Covered_Recipient_Specialty_1'] = chunk['Covered_Recipient_Specialty_1'].apply(
+                lambda x: x.split('|', 1)[1] if isinstance(x, str) and '|' in x else x
+            )
+        
+        return chunk
+    
+    def aggregate_rfm(self, chunk: pd.DataFrame):
+        """
+        Aggregate RFM values in memory.
+        
+        For each NPI:
+        - R (Recency): Days since most recent payment
+        - F (Frequency): Count of payment records
+        - M (Monetary): Sum of payment amounts
+        """
+        for _, row in chunk.iterrows():
+            try:
+                npi = row['Covered_Recipient_NPI']
+                amount = row['Total_Amount_of_Payment_USDollars']
+                payment_date = row['Date_of_Payment'].date()
+                
+                if npi not in self.doctor_stats:
+                    # Initialize doctor record
+                    self.doctor_stats[npi] = {
+                        'npi': npi,
+                        'first_name': row.get('Covered_Recipient_First_Name'),
+                        'last_name': row.get('Covered_Recipient_Last_Name'),
+                        'primary_type': row.get('Covered_Recipient_Primary_Type_1'),
+                        'specialty': row.get('Covered_Recipient_Specialty_1'),
+                        'state': row.get('Recipient_State'),
+                        'most_recent_date': payment_date,
+                        'frequency': 0,
+                        'monetary': 0.0
+                    }
+                
+                # Update RFM values
+                stats = self.doctor_stats[npi]
+                
+                # Update most recent date (for Recency)
+                if payment_date > stats['most_recent_date']:
+                    stats['most_recent_date'] = payment_date
+                
+                # Update Frequency
+                stats['frequency'] += 1
+                
+                # Update Monetary
+                stats['monetary'] += amount
+                
+                self.valid_rows += 1
+                
+            except Exception as e:
+                self.error_rows += 1
+                if self.error_rows <= 10:  # Only print first 10 errors
+                    print(f"Error processing row: {e}")
+    
+    def load_payment_details(self, chunk: pd.DataFrame, db: Session):
+        """
+        Load payment details to database (optional, for detailed analysis).
+        WARNING: This will insert millions of records!
+        """
+        if not IMPORT_DETAILS:
+            return
+        
+        for _, row in chunk.iterrows():
+            try:
+                payment_record = {
+                    'npi': row['Covered_Recipient_NPI'],
+                    'amount': row['Total_Amount_of_Payment_USDollars'],
+                    'payment_date': row['Date_of_Payment'].date(),
+                    'payment_type': row.get('Nature_of_Payment_or_Transfer_of_Value'),
+                    'manufacturer_name': row.get('Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_Name'),
+                    'product_name': row.get('Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_1')
+                }
+                self.payment_batch.append(payment_record)
+                
+                # Batch insert every 10k records
+                if len(self.payment_batch) >= 10000:
+                    db.bulk_insert_mappings(PaymentRecord, self.payment_batch)
+                    db.commit()
+                    self.payment_batch = []
+                    
+            except Exception as e:
+                self.error_rows += 1
+    
+    def process_csv(self):
+        """Main processing pipeline."""
+        print("="*60)
+        print("CMS Open Payments ETL Process")
+        print("="*60)
+        print(f"Source File: {CSV_FILE_PATH}")
+        print(f"Chunk Size: {CHUNK_SIZE:,}")
+        print(f"Import Details: {IMPORT_DETAILS}")
+        print(f"Reference Date: {REFERENCE_DATE}")
+        print("="*60)
+        
+        start_time = time.time()
+        
+        # Get total rows for progress bar
+        print("Counting total rows...")
+        total_rows = sum(1 for _ in open(CSV_FILE_PATH, encoding='utf-8')) - 1
+        print(f"Total rows: {total_rows:,}")
+        
+        # Process CSV in chunks
+        db = SessionLocal()
+        
+        try:
+            chunk_iterator = pd.read_csv(
+                CSV_FILE_PATH,
+                chunksize=CHUNK_SIZE,
+                usecols=CORE_FIELDS,
+                low_memory=False
+            )
+            
+            with tqdm(total=total_rows, desc="Processing", unit="rows") as pbar:
+                for chunk in chunk_iterator:
+                    self.total_rows += len(chunk)
+                    
+                    # Pipeline: Filter -> Clean -> Aggregate
+                    chunk = self.filter_chunk(chunk)
+                    chunk = self.clean_chunk(chunk)
+                    self.aggregate_rfm(chunk)
+                    
+                    # Optional: Load payment details
+                    if IMPORT_DETAILS:
+                        self.load_payment_details(chunk, db)
+                    
+                    pbar.update(len(chunk))
+            
+            # Insert remaining payment records
+            if IMPORT_DETAILS and self.payment_batch:
+                db.bulk_insert_mappings(PaymentRecord, self.payment_batch)
+                db.commit()
+            
+            # Calculate Recency and insert Doctor records
+            print("\nCalculating RFM values and inserting doctors...")
+            doctor_records = []
+            
+            for npi, stats in tqdm(self.doctor_stats.items(), desc="Preparing doctors"):
+                recency_days = (REFERENCE_DATE - stats['most_recent_date']).days
+                
+                doctor_records.append({
+                    'npi': stats['npi'],
+                    'first_name': stats['first_name'],
+                    'last_name': stats['last_name'],
+                    'primary_type': stats['primary_type'],
+                    'specialty': stats['specialty'],
+                    'state': stats['state'],
+                    'recency_days': recency_days,
+                    'frequency': stats['frequency'],
+                    'monetary': stats['monetary']
+                })
+            
+            # Batch insert doctors
+            print(f"Inserting {len(doctor_records):,} doctor records...")
+            db.bulk_insert_mappings(Doctor, doctor_records)
+            db.commit()
+            
+        except Exception as e:
+            print(f"\nERROR: {e}")
+            db.rollback()
+            raise
+        finally:
+            db.close()
+        
+        # Print statistics
+        elapsed_time = time.time() - start_time
+        
+        print("\n" + "="*60)
+        print("ETL Process Complete!")
+        print("="*60)
+        print(f"Total rows processed: {self.total_rows:,}")
+        print(f"Valid rows: {self.valid_rows:,}")
+        print(f"Filtered rows: {self.filtered_rows:,}")
+        print(f"Error rows: {self.error_rows:,}")
+        print(f"Unique doctors (NPIs): {len(self.doctor_stats):,}")
+        print(f"Elapsed time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
+        print("="*60)
+        
+        # Print sample statistics
+        if self.doctor_stats:
+            print("\nSample RFM Statistics:")
+            df_stats = pd.DataFrame(list(self.doctor_stats.values()))
+            print(f"Recency (days): min={df_stats['most_recent_date'].min()}, max={df_stats['most_recent_date'].max()}")
+            print(f"Frequency: mean={df_stats['frequency'].mean():.2f}, median={df_stats['frequency'].median():.0f}")
+            print(f"Monetary: mean=${df_stats['monetary'].mean():.2f}, median=${df_stats['monetary'].median():.2f}")
+
+
+def main():
+    """Main entry point."""
+    # Check if CSV file exists
+    if not os.path.exists(CSV_FILE_PATH):
+        print(f"ERROR: CSV file not found: {CSV_FILE_PATH}")
+        print("Please update the path in app/config.py")
+        sys.exit(1)
+    
+    # Create tables if not exist
+    Base.metadata.create_all(bind=engine)
+    
+    # Run ETL
+    processor = ETLProcessor()
+    processor.process_csv()
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+============================================================
+文件路径: E:\PharmaAgentSystem\backend\app\services\analysis_service_optimized.py
+总行数: 439
+============================================================
+"""
+Optimized Analysis Service with improved clustering algorithm and performance.
+ä¼˜åŒ–åŽçš„èšç±»åˆ†æžæœåŠ¡ - è§£å†³æ•°æ®è´¨é‡å’Œæ€§èƒ½é—®é¢˜
+
+ä¼˜åŒ–å†…å®¹ï¼š
+1. âœ… Recencyç»´åº¦åè½¬ - ä¿®æ­£è¯­ä¹‰çŸ›ç›¾
+2. âœ… æ”¹è¿›Logå˜æ¢é€»è¾‘ - æ›´å¥½å¤„ç†æžç«¯å€¼
+3. âœ… MiniBatchKMeans - æ€§èƒ½æå‡10å€
+4. âœ… æ¨¡åž‹æŒä¹…åŒ– - ä¿å­˜scalerå’Œkmeansæ¨¡åž‹
+5. âœ… ç»“æžœç¼“å­˜ - é¿å…é‡å¤è®¡ç®—
+6. âœ… å¢žå¼ºçš„è´¨é‡è¯„ä¼° - å¤šç»´åº¦è¯„ä¼°æŒ‡æ ‡
+"""
+import pandas as pd
+import numpy as np
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import MiniBatchKMeans, KMeans
+from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+import json
+import pickle
+import hashlib
+from datetime import datetime
+from pathlib import Path
+import traceback
+
+from ..models import Doctor, ClusterResult, AnalysisTask
+from ..database import engine
+
+
+class OptimizedAnalysisService:
+    """ä¼˜åŒ–åŽçš„èšç±»åˆ†æžæœåŠ¡"""
+
+    def __init__(self):
+        self.cache_dir = Path("cache/clustering")
+        self.model_dir = Path("cache/models")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+
+    def perform_clustering(self, db: Session, task_id: int, use_cache: bool = True):
+        """
+        æ‰§è¡Œä¼˜åŒ–åŽçš„K-Meansèšç±»åˆ†æž
+
+        ä¼˜åŒ–ç‚¹ï¼š
+        - Recencyåè½¬ï¼šä¿®æ­£è¯­ä¹‰ï¼ˆå€¼è¶Šå¤§=è¶Šæ´»è·ƒï¼‰
+        - Logå˜æ¢ï¼šå¤„ç†æžç«¯å€¼ï¼ˆ$91M â†’ logå˜æ¢ï¼‰
+        - MiniBatchKMeansï¼šå¤§æ•°æ®é›†æ€§èƒ½æå‡10å€
+        - æ¨¡åž‹æŒä¹…åŒ–ï¼šä¿å­˜scalerå’Œkmeansä¾›åŽç»­ä½¿ç”¨
+        - ç»“æžœç¼“å­˜ï¼šé¿å…é‡å¤è®¡ç®—
+
+        Args:
+            db: æ•°æ®åº“ä¼šè¯
+            task_id: ä»»åŠ¡ID
+            use_cache: æ˜¯å¦ä½¿ç”¨ç¼“å­˜ï¼ˆé»˜è®¤Trueï¼‰
+
+        Returns:
+            dict: ç»“æžœæ‘˜è¦
+        """
+        task = db.query(AnalysisTask).filter(AnalysisTask.task_id == task_id).first()
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+
+        try:
+            # 1. æ›´æ–°ä»»åŠ¡çŠ¶æ€
+            task.status = "running"
+            task.started_at = datetime.now()
+            task.progress = 10
+            db.commit()
+
+            # è§£æžå‚æ•°
+            params = json.loads(task.parameters) if task.parameters else {}
+            k = params.get('k', 3)
+            features = params.get('features', ['recency_days', 'frequency', 'monetary'])
+            use_minibatch = params.get('use_minibatch', True)  # é»˜è®¤ä½¿ç”¨MiniBatchåŠ é€Ÿ
+
+            # æ£€æŸ¥ç¼“å­˜
+            cache_key = self._get_cache_key(k, features)
+            if use_cache:
+                cached_result = self._load_from_cache(cache_key)
+                if cached_result:
+                    print(f"âœ… ä½¿ç”¨ç¼“å­˜ç»“æžœ: {cache_key}")
+                    return self._apply_cached_result(db, task, cached_result)
+
+            # 2. åŠ è½½æ•°æ®
+            task.progress = 20
+            db.commit()
+            print(f"ðŸ“Š åŠ è½½æ•°æ®ç”¨äºŽèšç±»ä»»åŠ¡ {task_id}...")
+
+            query_cols = [Doctor.npi] + [getattr(Doctor, f) for f in features if hasattr(Doctor, f)]
+            query = db.query(*query_cols)
+            df = pd.read_sql(query.statement, db.bind)
+
+            if df.empty:
+                raise ValueError("æ— å¯ç”¨çš„åŒ»ç”Ÿæ•°æ®è¿›è¡Œèšç±»")
+
+            print(f"âœ… åŠ è½½äº† {len(df)} æ¡åŒ»ç”Ÿè®°å½•")
+
+            # 3. æ•°æ®é¢„å¤„ç†ï¼ˆä¼˜åŒ–ç‰ˆï¼‰
+            task.progress = 30
+            db.commit()
+            print("ðŸ”§ å¼€å§‹æ•°æ®é¢„å¤„ç†...")
+
+            df_clean = df.copy().dropna()
+            original_features = features.copy()
+
+            # ðŸŒŸ ä¼˜åŒ–1: Recencyç»´åº¦åè½¬ï¼ˆä¿®æ­£è¯­ä¹‰é—®é¢˜ï¼‰
+            if 'recency_days' in features:
+                max_recency = df_clean['recency_days'].max()
+                df_clean['recency_score'] = max_recency - df_clean['recency_days']
+                print(f"âœ… Recencyåè½¬: {max_recency} - recency_days (å€¼è¶Šå¤§=è¶Šæ´»è·ƒ)")
+                # æ›¿æ¢featuresä¸­çš„recency_daysä¸ºrecency_score
+                features = [f if f != 'recency_days' else 'recency_score' for f in features]
+
+            # ðŸŒŸ ä¼˜åŒ–2: æ”¹è¿›çš„Logå˜æ¢ï¼ˆå¤„ç†æžç«¯å€¼ï¼‰
+            model_features = []
+            for f in features:
+                if f in ['frequency', 'monetary', 'total_payments', 'avg_payment_amount']:
+                    col_name = f"{f}_log"
+                    df_clean[col_name] = np.log1p(df_clean[f])
+                    model_features.append(col_name)
+
+                    # æ‰“å°å˜æ¢æ•ˆæžœ
+                    original_max = df_clean[f].max()
+                    log_max = df_clean[col_name].max()
+                    print(f"âœ… Logå˜æ¢ {f}: max {original_max:.2f} â†’ {log_max:.2f}")
+                else:
+                    model_features.append(f)
+
+            # ðŸŒŸ ä¼˜åŒ–3: æ ‡å‡†åŒ–ï¼ˆä¿å­˜scalerç”¨äºŽåŽç»­é¢„æµ‹ï¼‰
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(df_clean[model_features])
+            print(f"âœ… æ ‡å‡†åŒ–å®Œæˆ: {len(model_features)} ä¸ªç‰¹å¾")
+
+            # 4. K-Meansèšç±»ï¼ˆä½¿ç”¨MiniBatchKMeansåŠ é€Ÿï¼‰
+            task.progress = 50
+            db.commit()
+
+            # ðŸŒŸ ä¼˜åŒ–4: æ ¹æ®æ•°æ®é‡é€‰æ‹©ç®—æ³•
+            if use_minibatch and len(df_clean) > 50000:
+                print(f"ðŸš€ ä½¿ç”¨MiniBatchKMeans (æ•°æ®é‡={len(df_clean)} > 50,000)")
+                kmeans = MiniBatchKMeans(
+                    n_clusters=k,
+                    batch_size=10000,
+                    random_state=42,
+                    n_init=10,
+                    max_iter=300,
+                    verbose=0
+                )
+            else:
+                print(f"âš™ï¸  ä½¿ç”¨æ ‡å‡†KMeans (æ•°æ®é‡={len(df_clean)})")
+                kmeans = KMeans(
+                    n_clusters=k,
+                    random_state=42,
+                    n_init=10,
+                    max_iter=300
+                )
+
+            start_time = datetime.now()
+            cluster_labels = kmeans.fit_predict(X_scaled)
+            clustering_time = (datetime.now() - start_time).total_seconds()
+
+            df_clean['cluster_id'] = cluster_labels
+            print(f"âœ… èšç±»å®Œæˆï¼Œè€—æ—¶: {clustering_time:.2f}ç§’")
+
+            # 5. è®¡ç®—å¤šç»´åº¦è¯„ä¼°æŒ‡æ ‡
+            task.progress = 70
+            db.commit()
+            print("ðŸ“ˆ è®¡ç®—èšç±»è´¨é‡æŒ‡æ ‡...")
+
+            metrics = self._calculate_metrics(X_scaled, cluster_labels, k)
+            print(f"âœ… Silhouette Score: {metrics['silhouette']:.4f}")
+            print(f"âœ… Davies-Bouldin Index: {metrics['davies_bouldin']:.4f}")
+            print(f"âœ… Calinski-Harabasz Score: {metrics['calinski_harabasz']:.2f}")
+
+            # 6. åˆ†æžèšç±»ç‰¹å¾å¹¶ç”Ÿæˆæ ‡ç­¾
+            summary_stats, cluster_labels_map, strategies_map = self._analyze_clusters(
+                df_clean, k, original_features,
+                global_means=df_clean[original_features].mean()
+            )
+
+            # 7. ä¿å­˜èšç±»ç»“æžœ
+            task.progress = 80
+            db.commit()
+            print("ðŸ’¾ ä¿å­˜èšç±»ç»“æžœ...")
+
+            result = ClusterResult(
+                cluster_name=f"{task.task_name} Result (Optimized)",
+                task_id=task.task_id,
+                algorithm="minibatch-kmeans" if use_minibatch and len(df_clean) > 50000 else "kmeans",
+                features_used=json.dumps(original_features),
+                cluster_labels=json.dumps(cluster_labels_map),
+                silhouette_score=float(metrics['silhouette']),
+                inertia=float(metrics['inertia']),
+                kpi_summary=json.dumps({
+                    **summary_stats,
+                    "metrics": metrics,
+                    "clustering_time_seconds": clustering_time,
+                    "data_size": len(df_clean),
+                    "optimizations_applied": [
+                        "Recencyåè½¬",
+                        "Logå˜æ¢",
+                        "MiniBatchKMeans" if use_minibatch and len(df_clean) > 50000 else "StandardKMeans",
+                        "å¤šç»´åº¦è´¨é‡è¯„ä¼°"
+                    ]
+                }),
+                visualization_data=self._prepare_viz_data(df_clean, original_features, k),
+                is_active=True
+            )
+            db.add(result)
+            db.flush()
+
+            # 8. æ‰¹é‡æ›´æ–°Doctorè®°å½•
+            task.progress = 90
+            db.commit()
+            print("ðŸ”„ æ‰¹é‡æ›´æ–°åŒ»ç”Ÿè®°å½•...")
+
+            self._batch_update_doctors(db, df_clean[['npi', 'cluster_id']], cluster_labels_map)
+
+            # ðŸŒŸ ä¼˜åŒ–5: ä¿å­˜æ¨¡åž‹å’Œç¼“å­˜
+            self._save_models(cache_key, scaler, kmeans, result.cluster_id)
+            self._save_to_cache(cache_key, {
+                "result_id": result.cluster_id,
+                "cluster_labels_map": cluster_labels_map,
+                "summary_stats": summary_stats,
+                "metrics": metrics,
+                "timestamp": datetime.now().isoformat()
+            })
+
+            # 9. å®Œæˆä»»åŠ¡
+            task.status = "completed"
+            task.progress = 100
+            task.completed_at = datetime.now()
+            task.result_id = result.cluster_id
+
+            db.commit()
+
+            print(f"âœ… èšç±»ä»»åŠ¡å®Œæˆï¼ç»“æžœID: {result.cluster_id}")
+            return {
+                "task_id": task_id,
+                "cluster_id": result.cluster_id,
+                "status": "completed",
+                "metrics": metrics,
+                "clustering_time": clustering_time
+            }
+
+        except Exception as e:
+            db.rollback()
+            print(f"âŒ èšç±»é”™è¯¯: {str(e)}")
+            traceback.print_exc()
+            task.status = "failed"
+            task.error_message = str(e)
+            task.completed_at = datetime.now()
+            db.commit()
+            raise e
+
+    def _calculate_metrics(self, X_scaled, labels, k):
+        """è®¡ç®—å¤šç»´åº¦èšç±»è´¨é‡æŒ‡æ ‡"""
+        n_samples = len(X_scaled)
+
+        # Inertia (ç°‡å†…è¯¯å·®å¹³æ–¹å’Œ)
+        from sklearn.cluster import KMeans
+        temp_kmeans = KMeans(n_clusters=k, random_state=42)
+        temp_kmeans.fit(X_scaled)
+        inertia = temp_kmeans.inertia_
+
+        # Silhouette Score (è½®å»“ç³»æ•°ï¼Œ-1åˆ°1ï¼Œè¶ŠæŽ¥è¿‘1è¶Šå¥½)
+        if n_samples > 10000:
+            # å¤§æ•°æ®é›†é‡‡æ ·è®¡ç®—
+            indices = np.random.choice(n_samples, 10000, replace=False)
+            silhouette = silhouette_score(X_scaled[indices], labels[indices])
+        else:
+            silhouette = silhouette_score(X_scaled, labels)
+
+        # Davies-Bouldin Index (è¶Šå°è¶Šå¥½ï¼Œè¡¨ç¤ºç°‡é—´åˆ†ç¦»åº¦å¥½)
+        davies_bouldin = davies_bouldin_score(X_scaled, labels)
+
+        # Calinski-Harabasz Score (è¶Šå¤§è¶Šå¥½ï¼Œè¡¨ç¤ºç°‡å®šä¹‰æ˜Žç¡®)
+        calinski_harabasz = calinski_harabasz_score(X_scaled, labels)
+
+        return {
+            "inertia": float(inertia),
+            "silhouette": float(silhouette),
+            "davies_bouldin": float(davies_bouldin),
+            "calinski_harabasz": float(calinski_harabasz)
+        }
+
+    def _analyze_clusters(self, df, k, features, global_means):
+        """åˆ†æžèšç±»ç‰¹å¾å¹¶ç”Ÿæˆä¸šåŠ¡æ ‡ç­¾"""
+        stats = {}
+        labels_map = {}
+        strategies_map = {}
+
+        grouped = df.groupby('cluster_id')[features].mean()
+        counts = df['cluster_id'].value_counts()
+
+        for i in range(k):
+            cluster_stat = grouped.loc[i].to_dict()
+            count = int(counts[i])
+            percentage = round((count / len(df)) * 100, 2)
+
+            stats[str(i)] = {
+                "count": count,
+                "percentage": percentage,
+                "means": {k: float(v) for k, v in cluster_stat.items()}
+            }
+
+            # ç”Ÿæˆä¸šåŠ¡æ ‡ç­¾
+            labels_map[str(i)] = self._generate_label(cluster_stat, global_means)
+            strategies_map[str(i)] = self._generate_strategy_rule(cluster_stat, global_means)
+
+        return stats, labels_map, strategies_map
+
+    def _generate_label(self, cluster_means, global_means):
+        """ç”Ÿæˆèšç±»æ ‡ç­¾ï¼ˆä¼˜åŒ–ç‰ˆï¼Œè€ƒè™‘Recencyåè½¬ï¼‰"""
+        m = cluster_means.get('monetary', 0)
+        f = cluster_means.get('frequency', 0)
+        r = cluster_means.get('recency_score', cluster_means.get('recency_days', 0))
+
+        gm = global_means.get('monetary', 1)
+        gf = global_means.get('frequency', 1)
+        gr = global_means.get('recency_score', global_means.get('recency_days', 1))
+
+        # ä½¿ç”¨RFMç»¼åˆè¯„åˆ†
+        if m > gm * 2 and f > gf * 1.5:
+            return "High-Value Core (VIP)"
+        elif m > gm * 1.5 and f > gf:
+            return "Growth Potential"
+        elif f < gf * 0.5 and m < gm * 0.5:
+            return "Low-Engagement"
+        elif r < gr * 0.7:  # recency_scoreä½Ž=æœ€è¿‘æ²¡äº’åŠ¨
+            return "Dormant Customers"
+        else:
+            return "Regular Customers"
+
+    def _generate_strategy_rule(self, cluster_means, global_means):
+        """ç”Ÿæˆè¥é”€ç­–ç•¥å»ºè®®"""
+        label = self._generate_label(cluster_means, global_means)
+
+        strategy_map = {
+            "VIP": "é‡ç‚¹ç»´æŠ¤ï¼šæä¾›ä¸“å±žå­¦æœ¯æ”¯æŒã€ä¼šè®®é‚€è¯·å’Œå®šåˆ¶åŒ–æœåŠ¡ã€‚",
+            "Growth": "æ½œåŠ›æŒ–æŽ˜ï¼šå¢žåŠ æ‹œè®¿é¢‘çŽ‡ï¼Œä»‹ç»æ–°äº§å“ï¼Œæä¾›è¯•ç”¨è£…ã€‚",
+            "Low-Engagement": "æ¿€æ´»ç­–ç•¥ï¼šè°ƒç ”æœªå¤„æ–¹åŽŸå› ï¼Œå°è¯•ä½Žé—¨æ§›æ´»åŠ¨ã€‚",
+            "Dormant": "å”¤é†’è®¡åˆ’ï¼šå‘é€å…³æ€€é‚®ä»¶ï¼Œæä¾›é™æ—¶ä¼˜æƒ ï¼Œé‡æ–°å»ºç«‹è”ç³»ã€‚",
+            "Regular": "å¸¸è§„è·Ÿè¿›ï¼šä¿æŒæ•°å­—åŒ–è§¦è¾¾ï¼Œå®šæœŸæŽ¨é€å­¦æœ¯èµ„è®¯ã€‚"
+        }
+
+        for key, strategy in strategy_map.items():
+            if key in label:
+                return strategy
+
+        return "ä¿æŒå¸¸è§„è·Ÿè¿›ã€‚"
+
+    def _prepare_viz_data(self, df, features, k):
+        """å‡†å¤‡å¯è§†åŒ–æ•°æ®ï¼ˆé‡‡æ ·2000æ¡ï¼‰"""
+        sample_size = min(len(df), 2000)
+        sample = df.sample(n=sample_size, random_state=42)
+
+        data = []
+        for _, row in sample.iterrows():
+            item = {"cluster": int(row['cluster_id'])}
+            for f in features:
+                if f in row:
+                    item[f] = float(row[f])
+            data.append(item)
+
+        return json.dumps(data)
+
+    def _batch_update_doctors(self, db: Session, updates_df, cluster_labels_map):
+        """æ‰¹é‡æ›´æ–°åŒ»ç”Ÿçš„cluster_idå’Œcluster_label"""
+        updates = []
+        for _, row in updates_df.iterrows():
+            cluster_id = int(row['cluster_id'])
+            updates.append({
+                "npi": row['npi'],
+                "cluster_id": cluster_id,
+                "cluster_label": cluster_labels_map.get(str(cluster_id), "Unknown")
+            })
+
+        chunk_size = 5000
+        for i in range(0, len(updates), chunk_size):
+            db.bulk_update_mappings(Doctor, updates[i:i + chunk_size])
+            db.commit()
+            print(f"  æ›´æ–°è¿›åº¦: {min(i+chunk_size, len(updates))}/{len(updates)}")
+
+    def _get_cache_key(self, k, features):
+        """ç”Ÿæˆç¼“å­˜é”®"""
+        key_str = f"k={k}_features={sorted(features)}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    def _save_to_cache(self, cache_key, data):
+        """ä¿å­˜ç»“æžœåˆ°ç¼“å­˜"""
+        cache_file = self.cache_dir / f"{cache_key}.json"
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"ðŸ’¾ ç¼“å­˜å·²ä¿å­˜: {cache_file}")
+
+    def _load_from_cache(self, cache_key):
+        """ä»Žç¼“å­˜åŠ è½½ç»“æžœ"""
+        cache_file = self.cache_dir / f"{cache_key}.json"
+        if cache_file.exists():
+            # æ£€æŸ¥ç¼“å­˜æ˜¯å¦è¿‡æœŸï¼ˆ1å°æ—¶ï¼‰
+            import time
+            cache_age = time.time() - cache_file.stat().st_mtime
+            if cache_age < 3600:  # 1å°æ—¶å†…æœ‰æ•ˆ
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        return None
+
+    def _save_models(self, cache_key, scaler, kmeans, result_id):
+        """ä¿å­˜scalerå’Œkmeansæ¨¡åž‹"""
+        model_file = self.model_dir / f"{cache_key}_models.pkl"
+        with open(model_file, 'wb') as f:
+            pickle.dump({
+                "scaler": scaler,
+                "kmeans": kmeans,
+                "result_id": result_id,
+                "timestamp": datetime.now().isoformat()
+            }, f)
+        print(f"ðŸ’¾ æ¨¡åž‹å·²ä¿å­˜: {model_file}")
+
+    def _apply_cached_result(self, db, task, cached_data):
+        """åº”ç”¨ç¼“å­˜ç»“æžœ"""
+        task.status = "completed"
+        task.progress = 100
+        task.completed_at = datetime.now()
+        task.result_id = cached_data.get("result_id")
+        db.commit()
+
+        return {
+            "task_id": task.task_id,
+            "cluster_id": cached_data.get("result_id"),
+            "status": "completed",
+            "from_cache": True
+        }
+
+
+# åˆ›å»ºæœåŠ¡å®žä¾‹
+optimized_analysis_service = OptimizedAnalysisService()
+
+
+
+
+============================================================
+文件路径: E:\PharmaAgentSystem\backend\app\services\dify_service.py
+总行数: 257
+============================================================
+"""
+Dify AI Service for generating marketing strategy reports.
+Supports SSE streaming for real-time report generation.
+"""
+import httpx
+import json
+from typing import AsyncGenerator, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+import logging
+
+from app.config import get_settings
+from app.models import AIReport, ClusterResult
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+class DifyService:
+    """Service for interacting with Dify Chatflow API."""
+    
+    def __init__(self):
+        self.api_key = settings.dify_api_key
+        self.api_url = settings.dify_api_url
+        self.timeout = 120.0
+    
+    def _get_headers(self) -> dict:
+        """Get HTTP headers for Dify API requests."""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+    
+    def prepare_cluster_stats(self, cluster_result: ClusterResult) -> str:
+        """
+        Prepare cluster statistics as JSON string for Dify input.
+        
+        Args:
+            cluster_result: ClusterResult database model
+            
+        Returns:
+            JSON string containing cluster statistics
+        """
+        try:
+            kpi_summary = json.loads(cluster_result.kpi_summary) if cluster_result.kpi_summary else {}
+            cluster_labels = json.loads(cluster_result.cluster_labels) if cluster_result.cluster_labels else {}
+            
+            # Calculate K from cluster_labels or kpi_summary
+            k_value = len(kpi_summary) if kpi_summary else len(cluster_labels)
+            
+            stats_dict = {
+                "cluster_id": cluster_result.cluster_id,
+                "cluster_name": cluster_result.cluster_name or f"Cluster {cluster_result.cluster_id}",
+                "k_value": k_value,
+                "algorithm": cluster_result.algorithm or "k-means",
+                "silhouette_score": float(cluster_result.silhouette_score) if cluster_result.silhouette_score else None,
+                "inertia": float(cluster_result.inertia) if cluster_result.inertia else None,
+                "clusters": []
+            }
+            
+            # Add individual cluster details
+            for cluster_id, stats in kpi_summary.items():
+                label = cluster_labels.get(str(cluster_id), f"Cluster {cluster_id}")
+                cluster_info = {
+                    "cluster_id": cluster_id,
+                    "label": label,
+                    "size": stats.get('size', 0),
+                    "size_percentage": stats.get('size_percentage', 0),
+                    "avg_frequency": stats.get('Avg_F_Count', stats.get('avg_frequency', 0)),
+                    "avg_monetary": stats.get('Avg_M_Amount', stats.get('avg_monetary', 0)),
+                    "avg_recency": stats.get('Avg_R_Days', stats.get('avg_recency', 0))
+                }
+                stats_dict["clusters"].append(cluster_info)
+            
+            return json.dumps(stats_dict, ensure_ascii=False)
+            
+        except Exception as e:
+            logger.error(f"Error preparing cluster stats: {e}")
+            return json.dumps({"error": "Failed to prepare cluster statistics"}, ensure_ascii=False)
+    
+    async def stream_chat(
+        self,
+        cluster_stats: str,
+        user_intent: str = "",
+        user_id: str = "default"
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream AI-generated strategy report using Dify Chatflow API.
+        
+        Args:
+            cluster_stats: JSON string of cluster statistics
+            user_intent: User's custom instruction
+            user_id: User identifier
+            
+        Yields:
+            Text chunks as they arrive from Dify
+        """
+        if not self.api_key:
+            # Mock mode for development
+            logger.warning("No Dify API key configured, using mock mode")
+            yield "# AIç­–ç•¥æŠ¥å‘Š (å¼€å‘æ¨¡å¼)\n\n"
+            yield "## æ¦‚è¿°\n"
+            yield "ç”±äºŽæœªé…ç½®Dify API Keyï¼Œæ­¤æŠ¥å‘Šä¸ºæ¨¡æ‹Ÿå†…å®¹ã€‚\n\n"
+            yield f"## èšç±»æ•°æ®\n```json\n{cluster_stats}\n```\n\n"
+            yield "## å»ºè®®ç­–ç•¥\n"
+            yield "1. **é«˜ä»·å€¼å®¢æˆ·ç¾¤**: ç»´æŠ¤å…³ç³»ï¼Œæä¾›ä¸“å±žæœåŠ¡\n"
+            yield "2. **æ½œåŠ›å®¢æˆ·ç¾¤**: å¢žåŠ äº’åŠ¨ï¼ŒæŒ–æŽ˜éœ€æ±‚\n"
+            yield "3. **å¤§ä¼—å®¢æˆ·ç¾¤**: é€šç”¨è¥é”€ï¼Œæé«˜æ•ˆçŽ‡\n"
+            return
+        
+        # Construct payload for Dify Chatflow
+        # IMPORTANT: Variable names must match Dify workflow start node
+        payload = {
+            "inputs": {
+                "cluster_data": cluster_stats,      # Matches Dify variable name
+                "user_focus": user_intent or "è¯·ç”Ÿæˆè¯¦ç»†çš„è¥é”€ç­–ç•¥æŠ¥å‘Š"  # Matches Dify variable name
+            },
+            "query": user_intent or "è¯·æ ¹æ®èšç±»æ•°æ®ç”Ÿæˆè¥é”€ç­–ç•¥æŠ¥å‘Š",  # Required field, cannot be empty
+            "response_mode": "streaming",
+            "conversation_id": "",
+            "user": user_id
+        }
+        
+        logger.info(f"Calling Dify Chatflow API at {self.api_url}/chat-messages")
+        logger.debug(f"Payload inputs: cluster_data={len(cluster_stats)} chars, user_focus={user_intent[:50] if user_intent else 'default'}...")
+        
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{self.api_url}/chat-messages",  # Use chat-messages for Chatflow
+                    headers=self._get_headers(),
+                    json=payload
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        error_msg = f"Dify API Error {response.status_code}: {error_text.decode()}"
+                        logger.error(error_msg)
+                        yield f"\n\n[é”™è¯¯: {error_msg}]"
+                        return
+                    
+                    # Parse SSE stream
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                            
+                        # Dify SSE format: "data: {...}"
+                        if line.startswith("data: "):
+                            data_str = line[6:].strip()
+                            
+                            # Check for end signal
+                            if data_str == "[DONE]":
+                                logger.info("Dify stream completed")
+                                break
+                            
+                            try:
+                                data = json.loads(data_str)
+                                
+                                # Extract answer from different event types
+                                if "answer" in data:
+                                    # For agent_message or message events
+                                    yield data["answer"]
+                                elif "event" in data:
+                                    event_type = data["event"]
+                                    
+                                    if event_type == "agent_message" and "answer" in data:
+                                        yield data["answer"]
+                                    elif event_type == "message" and "answer" in data:
+                                        yield data["answer"]
+                                    elif event_type == "error":
+                                        error_msg = data.get("message", "Unknown error")
+                                        logger.error(f"Dify error event: {error_msg}")
+                                        yield f"\n\n[Difyé”™è¯¯: {error_msg}]"
+                                        break
+                                        
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"Failed to parse SSE data: {data_str[:100]}... Error: {e}")
+                                continue
+                                
+            except httpx.TimeoutException:
+                error_msg = "Request timed out after 120 seconds"
+                logger.error(error_msg)
+                yield f"\n\n[é”™è¯¯: {error_msg}]"
+            except httpx.ConnectError as e:
+                error_msg = f"Cannot connect to Dify at {self.api_url}"
+                logger.error(f"{error_msg}: {e}")
+                yield f"\n\n[è¿žæŽ¥é”™è¯¯: {error_msg}]"
+            except httpx.RequestError as e:
+                error_msg = f"Request error: {str(e)}"
+                logger.error(error_msg)
+                yield f"\n\n[è¯·æ±‚é”™è¯¯: {error_msg}]"
+            except Exception as e:
+                error_msg = f"Unexpected error: {type(e).__name__}: {str(e)}"
+                logger.error(error_msg)
+                yield f"\n\n[æœªçŸ¥é”™è¯¯: {error_msg}]"
+    
+    def save_report(
+        self,
+        db: Session,
+        title: str,
+        content: str,
+        cluster_id: int,
+        user_id: int,
+        user_prompt: Optional[str] = None,
+        generation_time: float = 0.0
+    ) -> AIReport:
+        """
+        Save generated report to database.
+        
+        Args:
+            db: Database session
+            title: Report title
+            content: Full report content (markdown)
+            cluster_id: Related cluster ID
+            user_id: User who generated the report
+            user_prompt: User's custom prompt
+            generation_time: Time taken to generate (seconds)
+            
+        Returns:
+            Created AIReport instance
+        """
+        # Combine user prompt into summary if available
+        summary_text = content[:300] if len(content) > 300 else content
+        if user_prompt:
+            summary_text = f"User Request: {user_prompt}\n\nSummary: {summary_text}"
+            
+        report = AIReport(
+            report_title=title,
+            report_type="cluster_strategy",
+            report_content=content,
+            report_summary=summary_text[:500] if len(summary_text) > 500 else summary_text,
+            related_cluster_id=cluster_id,
+            generated_by=user_id,
+            # user_prompt removed as it is not a column
+            generation_time=generation_time,
+            status="published",
+            created_at=datetime.utcnow()
+        )
+        db.add(report)
+        
+        # Also update the ClusterResult strategy_focus for easy access
+        cluster_result = db.query(ClusterResult).filter(ClusterResult.cluster_id == cluster_id).first()
+        if cluster_result:
+            cluster_result.strategy_focus = report.report_summary
+            # Also update context_for_llm if distinct from kpi_summary
+            if user_prompt:
+                cluster_result.context_for_llm = f"Last User Prompt: {user_prompt}"
+                
+        db.commit()
+        db.refresh(report)
+        logger.info(f"Saved report {report.report_id} and updated cluster {cluster_id}")
+        return report
+
+
+# Singleton instance
+dify_service = DifyService()
+
+
+
+
+============================================================
+文件路径: E:\PharmaAgentSystem\backend\app\models.py
+总行数: 282
+============================================================
+"""
+SQLAlchemy ORM Models for Pharma Market Analysis System.
+
+Tables:
+- User: System users with authentication
+- Doctor: Aggregated doctor profiles with RFM values
+- PaymentRecord: Cleaned payment records from CMS Open Payments
+- ClusterResult: K-Means clustering results for AI strategy generation
+"""
+from datetime import date, datetime
+from typing import Optional
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, ForeignKey, JSON, Boolean
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from .database import Base
+
+
+class User(Base):
+    """User table for authentication and authorization."""
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    email = Column(String(100), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(100), nullable=True)
+    phone = Column(String(20), nullable=True)
+    bio = Column(Text, nullable=True)
+    role = Column(String(20), default="viewer")  # admin / analyst / viewer
+    avatar_url = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_login = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    analysis_tasks = relationship("AnalysisTask", back_populates="creator")
+    ai_reports = relationship("AIReport", back_populates="creator")
+    
+    def __repr__(self):
+        return f"<User(id={self.id}, username={self.username})>"
+
+
+class Doctor(Base):
+    """
+    Doctor profile table - stores aggregated doctor information and RFM values.
+    Primary key is NPI (National Provider Identifier).
+    """
+    __tablename__ = "doctors"
+    
+    # Primary identifier
+    npi = Column(String(10), primary_key=True, index=True, comment="National Provider Identifier")
+    
+    # Basic information
+    first_name = Column(String(100), nullable=True, comment="åŒ»ç”Ÿå")
+    last_name = Column(String(100), nullable=True, comment="åŒ»ç”Ÿå§“")
+    full_name = Column(String(200), nullable=True, comment="å…¨å (first_name + last_name)")
+    primary_type = Column(String(100), nullable=True, comment="åŒ»ç”Ÿç±»åž‹ (Medical Doctor, DO, etc.)")
+    specialty = Column(String(200), nullable=True, index=True, comment="ä¸“ç§‘åˆ†ç±»")
+    state = Column(String(10), nullable=True, index=True, comment="æ‰€åœ¨å·ž")
+    city = Column(String(100), nullable=True, comment="åŸŽå¸‚")
+    
+    # RFM Values (computed from PaymentRecords)
+    recency_days = Column(Integer, nullable=True, comment="æœ€è¿‘æ”¯ä»˜è·ä»Šå¤©æ•° (Rå€¼)")
+    frequency = Column(Integer, nullable=True, comment="æ”¯ä»˜è®°å½•æ¬¡æ•° (Få€¼)")
+    monetary = Column(Float, nullable=True, comment="ç´¯è®¡æ”¯ä»˜æ€»é‡‘é¢ (Må€¼)")
+    
+    # Additional aggregated metrics
+    total_payments = Column(Integer, default=0, comment="æ”¯ä»˜è®°å½•æ€»æ•°")
+    avg_payment_amount = Column(Float, default=0.0, comment="å¹³å‡å•ç¬”æ”¯ä»˜é‡‘é¢")
+    last_payment_date = Column(Date, nullable=True, comment="æœ€è¿‘æ”¯ä»˜æ—¥æœŸ")
+    
+    # Clustering result
+    cluster_id = Column(Integer, ForeignKey("cluster_results.cluster_id"), nullable=True)
+    cluster_label = Column(String(50), nullable=True, comment="èšç±»æ ‡ç­¾ (å¦‚: æ ¸å¿ƒå®¢æˆ·)")
+    
+    # Relationships
+    payments = relationship("PaymentRecord", back_populates="doctor")
+    cluster = relationship("ClusterResult", back_populates="doctors")
+    
+    def __repr__(self):
+        return f"<Doctor(npi={self.npi}, name={self.first_name} {self.last_name})>"
+
+
+class PaymentRecord(Base):
+    """
+    Payment record table - stores cleaned records from CMS Open Payments.
+    Each record represents a single payment/transfer of value.
+    """
+    __tablename__ = "payment_records"
+    
+    # Primary key (auto-increment)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Foreign key to Doctor
+    npi = Column(String(10), ForeignKey("doctors.npi"), index=True, nullable=False)
+    
+    # Payment details
+    amount = Column(Float, nullable=False, comment="æ”¯ä»˜é‡‘é¢ (USD)")
+    payment_date = Column(Date, nullable=False, comment="æ”¯ä»˜æ—¥æœŸ")
+    payment_type = Column(String(100), nullable=True, comment="æ”¯ä»˜ç±»åž‹ (Nature_of_Payment)")
+    
+    # Manufacturer/Product info
+    manufacturer_name = Column(String(200), nullable=True, comment="è¯ä¼åç§°")
+    product_name = Column(String(200), nullable=True, comment="äº§å“åç§°")
+    
+    # Relationship
+    doctor = relationship("Doctor", back_populates="payments")
+    
+    def __repr__(self):
+        return f"<PaymentRecord(id={self.id}, npi={self.npi}, amount={self.amount})>"
+
+
+class ClusterResult(Base):
+    """
+    Cluster result table - stores K-Means clustering analysis results.
+    Used to provide context for Dify AI strategy generation.
+    """
+    __tablename__ = "cluster_results"
+    
+    # Primary key
+    cluster_id = Column(Integer, primary_key=True, comment="èšç±»ç¼–å·")
+    
+    # Cluster metadata
+    cluster_name = Column(String(100), nullable=True, comment="èšç±»åç§° (å¦‚: é«˜ä»·å€¼æ ¸å¿ƒå®¢æˆ·)")
+    size_count = Column(Integer, nullable=True, comment="è¯¥èšç±»åŒ»ç”Ÿæ•°é‡")
+    size_percentage = Column(Float, nullable=True, comment="å æ€»åŒ»ç”Ÿç™¾åˆ†æ¯”")
+    
+    # Analysis metadata
+    task_id = Column(Integer, ForeignKey("analysis_tasks.task_id"), nullable=True, comment="å…³è”çš„åˆ†æžä»»åŠ¡ID")
+    algorithm = Column(String(50), default="k-means", comment="èšç±»ç®—æ³•")
+    features_used = Column(Text, nullable=True, comment="ä½¿ç”¨çš„ç‰¹å¾åˆ—è¡¨ (JSON)")
+    cluster_labels = Column(Text, nullable=True, comment="èšç±»æ ‡ç­¾æ˜ å°„ (JSON)")
+    
+    # Quality metrics
+    silhouette_score = Column(Float, nullable=True, comment="è½®å»“ç³»æ•°")
+    inertia = Column(Float, nullable=True, comment="ç°‡å†…è¯¯å·®å¹³æ–¹å’Œ")
+    
+    # KPI Summary (JSON structure for AI consumption)
+    # Example: {"Avg_R_Days": 30, "Avg_F_Count": 50, "Avg_M_Amount": 15000.0, "Top_Specialty": "å¿ƒè¡€ç®¡å†…ç§‘"}
+    kpi_summary = Column(JSON, nullable=True, comment="èšç±» KPI æ‘˜è¦ (JSON)")
+    
+    # Strategy focus (human-readable or AI-generated)
+    strategy_focus = Column(Text, nullable=True, comment="ç­–ç•¥å»ºè®®")
+    
+    # Context for LLM (additional info for Dify)
+    context_for_llm = Column(Text, nullable=True, comment="ç»™ AI çš„è¡¥å……ä¸Šä¸‹æ–‡")
+    
+    # Visualization and status
+    visualization_data = Column(Text, nullable=True, comment="å¯è§†åŒ–æ•°æ® (JSON)")
+    is_active = Column(Boolean, default=True, comment="æ˜¯å¦æ¿€æ´»")
+    
+    # Relationships
+    doctors = relationship("Doctor", back_populates="cluster")
+    # Decoupled relationship to avoid circular dependency
+    task = relationship("AnalysisTask", foreign_keys=[task_id])
+    
+    def __repr__(self):
+        return f"<ClusterResult(id={self.cluster_id}, name={self.cluster_name})>"
+
+
+class AnalysisTask(Base):
+    """
+    Analysis task table - tracks K-Means clustering and RFM analysis jobs.
+    Enables async task execution and progress monitoring.
+    """
+    __tablename__ = "analysis_tasks"
+    
+    # Primary key
+    task_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Task metadata
+    task_name = Column(String(200), nullable=False, comment="ä»»åŠ¡åç§°")
+    task_type = Column(String(50), nullable=False, comment="ä»»åŠ¡ç±»åž‹ (clustering, rfm_analysis)")
+    parameters = Column(Text, nullable=True, comment="ä»»åŠ¡å‚æ•° (JSON)")
+    
+    # Status tracking
+    status = Column(String(20), default="pending", comment="çŠ¶æ€: pending/running/completed/failed")
+    progress = Column(Integer, default=0, comment="è¿›åº¦ (0-100)")
+    error_message = Column(Text, nullable=True, comment="é”™è¯¯ä¿¡æ¯")
+    
+    # User and timing
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Result reference
+    result_id = Column(Integer, ForeignKey("cluster_results.cluster_id"), nullable=True)
+    
+    # Relationships
+    creator = relationship("User", back_populates="analysis_tasks", foreign_keys=[created_by])
+    # Decoupled relationship
+    result = relationship("ClusterResult", foreign_keys=[result_id])
+    
+    def __repr__(self):
+        return f"<AnalysisTask(id={self.task_id}, name={self.task_name}, status={self.status})>"
+
+
+class AIReport(Base):
+    """
+    AI report table - stores Dify-generated market strategy reports.
+    Supports Markdown content and metadata for report management.
+    """
+    __tablename__ = "ai_reports"
+    
+    # Primary key
+    report_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Report content
+    report_title = Column(String(300), nullable=False, comment="æŠ¥å‘Šæ ‡é¢˜")
+    report_type = Column(String(50), nullable=False, comment="æŠ¥å‘Šç±»åž‹ (cluster_analysis, doctor_profile)")
+    report_content = Column(Text, nullable=False, comment="æŠ¥å‘Šå†…å®¹ (Markdown)")
+    report_summary = Column(Text, nullable=True, comment="æŠ¥å‘Šæ‘˜è¦")
+    
+    # Related entities
+    related_cluster_id = Column(Integer, ForeignKey("cluster_results.cluster_id"), nullable=True)
+    related_npi = Column(String(20), ForeignKey("doctors.npi"), nullable=True)
+    
+    # Generation metadata
+    generated_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    dify_conversation_id = Column(String(100), nullable=True, comment="Difyå¯¹è¯ID")
+    generation_time = Column(Float, nullable=True, comment="ç”Ÿæˆè€—æ—¶ (ç§’)")
+    
+    # Publishing status
+    status = Column(String(20), default="draft", comment="çŠ¶æ€: draft/published/archived")
+    view_count = Column(Integer, default=0, comment="æŸ¥çœ‹æ¬¡æ•°")
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    cluster = relationship("ClusterResult")
+    doctor = relationship("Doctor")
+    creator = relationship("User", back_populates="ai_reports", foreign_keys=[generated_by])
+    
+    def __repr__(self):
+        return f"<AIReport(id={self.report_id}, title={self.report_title})>"
+
+
+class LoginLog(Base):
+    """
+    Log table for user login attempts.
+    """
+    __tablename__ = "sys_login_logs"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), nullable=False, index=True)
+    ip_address = Column(String(50), nullable=True)
+    browser = Column(String(200), nullable=True)
+    os = Column(String(100), nullable=True)
+    status = Column(Integer, default=1, comment="1=Success, 0=Failed")
+    message = Column(String(255), nullable=True)
+    login_time = Column(DateTime(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"<LoginLog(username={self.username}, status={self.status})>"
+
+
+class OperationLog(Base):
+    """
+    Log table for critical system operations (POST/PUT/DELETE).
+    """
+    __tablename__ = "sys_op_logs"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), nullable=True, index=True)
+    module = Column(String(50), nullable=True, comment="Module name")
+    summary = Column(String(255), nullable=True, comment="Operation summary")
+    method = Column(String(10), nullable=False, comment="HTTP Method")
+    path = Column(String(255), nullable=False, comment="Request Path")
+    params = Column(Text, nullable=True, comment="Request Params/Body (JSON)")
+    status = Column(Integer, nullable=True, comment="HTTP Status Code")
+    latency_ms = Column(Integer, nullable=True, comment="Latency in ms")
+    error_msg = Column(Text, nullable=True, comment="Error stack trace")
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"<OperationLog(module={self.module}, summary={self.summary})>"
+
+
+
+
+============================================================
+文件路径: E:\PharmaAgentSystem\backend\app\routers\reports.py
+总行数: 215
+============================================================
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+from typing import Optional, List
+from datetime import datetime
+from pydantic import BaseModel
+import time
+
+from ..database import get_db
+from ..models import User, AIReport, ClusterResult, Doctor
+from ..schemas import AIReportResponse, AIReportCreate, AIReportList
+from ..core.security import get_current_user
+from ..services.dify_service import dify_service
+
+router = APIRouter()
+
+
+class GenerateStrategyRequest(BaseModel):
+    cluster_id: int
+    user_prompt: Optional[str] = None
+
+
+@router.get("", response_model=AIReportList)
+async def get_reports(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    report_type: Optional[str] = None,
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get paginated list of reports.
+    """
+    query = db.query(AIReport)
+    
+    if report_type:
+        query = query.filter(AIReport.report_type == report_type)
+    if status:
+        query = query.filter(AIReport.status == status)
+        
+    total = query.count()
+    items = query.order_by(desc(AIReport.created_at))\
+        .offset((page - 1) * page_size)\
+        .limit(page_size)\
+        .all()
+    
+    return {
+        "total": total,
+        "items": items
+    }
+
+
+@router.get("/{report_id}", response_model=AIReportResponse)
+async def get_report(
+    report_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed report by ID.
+    """
+    report = db.query(AIReport).filter(AIReport.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+        
+    # Increment view count
+    report.view_count += 1
+    db.commit()
+    
+    return report
+
+
+@router.post("/generate-stream")
+async def generate_strategy_stream(
+    request: GenerateStrategyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate AI strategy report with SSE streaming.
+    Returns text/event-stream for real-time display.
+    """
+    # Get cluster result
+    cluster = db.query(ClusterResult).filter(ClusterResult.cluster_id == request.cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    
+    # Prepare cluster statistics as JSON string
+    cluster_stats_json = dify_service.prepare_cluster_stats(cluster)
+    
+    async def event_generator():
+        start_time = time.time()
+        full_content = []
+        
+        async for chunk in dify_service.stream_chat(
+            cluster_stats=cluster_stats_json,
+            user_intent=request.user_prompt or "",
+            user_id=str(current_user.id)
+        ):
+            full_content.append(chunk)
+            yield f"data: {chunk}\n\n"
+        
+        # Signal end
+        yield "data: [DONE]\n\n"
+        
+        # Save report (non-streaming, after completion)
+        generation_time = time.time() - start_time
+        dify_service.save_report(
+            db=db,
+            title=f"AIç­–ç•¥æŠ¥å‘Š - Cluster {request.cluster_id}",
+            content="".join(full_content),
+            cluster_id=request.cluster_id,
+            user_id=current_user.id,
+            user_prompt=request.user_prompt,
+            generation_time=generation_time
+        )
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
+
+
+@router.post("/generate", status_code=201)
+async def generate_report_sync(
+    request: AIReportCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate and save an AI report (non-streaming, synchronous).
+    """
+    # Get cluster result if related
+    cluster = None
+    cluster_stats_json = ""
+    if request.related_cluster_id:
+        cluster = db.query(ClusterResult).filter(ClusterResult.cluster_id == request.related_cluster_id).first()
+        if cluster:
+            cluster_stats_json = dify_service.prepare_cluster_stats(cluster)
+    
+    # Generate content (collect all chunks)
+    content_parts = []
+    async for chunk in dify_service.stream_chat(
+        cluster_stats=cluster_stats_json,
+        user_intent="",
+        user_id=str(current_user.id)
+    ):
+        content_parts.append(chunk)
+    
+    content = "".join(content_parts)
+    
+    # Save report
+    report = dify_service.save_report(
+        db=db,
+        title=request.report_title,
+        content=content,
+        cluster_id=request.related_cluster_id or 0,
+        user_id=current_user.id,
+        generation_time=0.0
+    )
+    
+    return {
+        "code": 201,
+        "message": "Report generated successfully",
+        "report_id": report.report_id
+    }
+
+
+@router.delete("/{report_id}")
+async def delete_report(
+    report_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a report (soft delete by changing status to archived).
+    """
+    report = db.query(AIReport).filter(AIReport.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    report.status = "archived"
+    db.commit()
+    
+    return {"code": 200, "message": "Report archived successfully"}
+
+
+@router.get("/{report_id}/download")
+async def download_report(
+    report_id: int,
+    format: str = Query("markdown", regex="^(markdown|pdf|docx)$"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Download report in specified format.
+    """
+    report = db.query(AIReport).filter(AIReport.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    # In a real app, generate file here
+    return {
+        "code": 200,
+        "message": f"Download link for {format} format",
+        "download_url": f"/api/v1/reports/{report_id}/files/{format}" # Placeholder
+    }
+
+
+
+

@@ -1,0 +1,49 @@
+任务4：提取数据库模型的真实字段定义
+
+1. 代码文件路径：
+`backend/app/models.py`
+
+2. 函数/类名称：
+`Doctor`, `ClusterResult`, `AIReport`, `AnalysisTask`
+
+3. 关键代码片段 (抽取出的真实字段定义结构)：
+
+| 实体表名 | 实际字段名称 | 数据类型 | 约束定义/说明 |
+|---|---|---|---|
+| **doctors** | npi | String(10) | PRIMARY KEY, INDEX |
+| | full_name | String(200) | 医生全名 |
+| | specialty | String(200) | INDEX, 专科分类 |
+| | recency_days | Integer | 最近支付距今天数 (R值原始) |
+| | frequency | Integer | 支付记录次数 (F值) |
+| | monetary | Float | 累计支付总金额 (M值) |
+| | cluster_id | Integer | FOREIGN KEY, 聚类引用的标识ID |
+| | cluster_label | String(50) | 具体的语义大类文字标签 |
+
+| 实体表名 | 实际字段名称 | 数据类型 | 约束定义/说明 |
+|---|---|---|---|
+| **cluster_results** | cluster_id | Integer | PRIMARY KEY, AUTOINCREMENT |
+| | k_value | Integer | NOT NULL, 设定的聚类组参数K |
+| | silhouette_score | Float | 记录全盘的轮廓测试系数分数 |
+| | cluster_stats | Text | 作为提供给LLM核心输入的JSON大字段 |
+| | kpi_summary | JSON | 包含数据规模及指标均值的前端图表摘要 |
+| | visualization_data | Text | 用于存储ECharts三维描点散布数据的JSON |
+
+| 实体表名 | 实际字段名称 | 数据类型 | 约束定义/说明 |
+|---|---|---|---|
+| **ai_reports** | report_id | Integer | PRIMARY KEY, AUTOINCREMENT |
+| | report_title | String(300) | NOT NULL, 标题名 |
+| | report_content | Text | NOT NULL, LLM生成的全篇Markdown内容 |
+| | report_summary | Text | 用于页面浏览缩略语前300字摘要片段 |
+| | related_cluster_id | Integer | FOREIGN KEY, 对标关联结果集外键 |
+| | generation_time | Float | 耗时性能分析追溯所用的审计度量字段(秒) |
+
+| 实体表名 | 实际字段名称 | 数据类型 | 约束定义/说明 |
+|---|---|---|---|
+| **analysis_tasks** | task_id | Integer | PRIMARY KEY, 自增派发标识号 |
+| | task_type | String(50) | 任务类别（例如：clustering）|
+| | status | String(20) | pending/running/completed/failed |
+| | progress | Integer | 前端等待条数值追踪 （0-100） |
+| | error_message | Text | 排查定位错误崩溃快照 |
+
+4. 可直接引用进论文的中文描述语句：
+在数据库持久层逻辑关系构建方面，主要借助SQLAlchemy对象关系映射框架（ORM）创建底座星型核心架构。首领基石骨干包含一张叫做 `doctors` （医生事实基础画像表），包含脱敏 `npi` 十位字符串做聚集主键并打通对外的外接身份验证渠道。`rfm_monetary` 及 `frequency` 代表客观发生的冰冷统计金额，另外具备承接高维度演化标签的关联附着列 `cluster_id` 和对应文本名 `cluster_label`。由它延伸出去派生两套结果存放资产池，第一是承担宏观数学参数快照的 `cluster_results`（分析聚合结算单表）不仅通过 `silhouette_score` 保留对该次运算有效性评估的分数考核，更利用庞大的多字段诸如 `cluster_stats` 结构专门打包准备了喂给云端生成智能体用的大型上下文摘要文段。最终演化出的人类逻辑文本段将原封不动存放进处于关联业务外圈的名为 `ai_reports` 报告保存实体中并标记对应生成时长与目标归属 ID。同时侧翼独立支撑由一张名曰 `analysis_tasks` （后台调度排布状态监视表）以记录自 0 至 100 `%` 的任务进度监控及状态枚举管理（挂起/运算中/完成或崩坏抛出异常错误日志信息 `error_message` ），这极大地改善了后台在高容灾并发时的工作流状态留存机制。

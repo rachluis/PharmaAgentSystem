@@ -1,0 +1,49 @@
+任务1：提取ETL模块的真实实现细节
+
+1. 代码文件路径：
+`backend/scripts/etl_process.py`
+
+2. 函数名称：
+`filter_chunk`, `clean_chunk`, `aggregate_rfm`, `process_csv`
+
+3. 关键代码片段：
+```python
+# 字段裁剪列表 (CORE_FIELDS)
+CORE_FIELDS = [
+    'Covered_Recipient_NPI', 'Covered_Recipient_First_Name', 'Covered_Recipient_Last_Name',
+    'Covered_Recipient_Primary_Type_1', 'Covered_Recipient_Specialty_1', 'Recipient_State',
+    'Total_Amount_of_Payment_USDollars', 'Date_of_Payment',
+    'Nature_of_Payment_or_Transfer_of_Value', 'Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_Name',
+    'Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_1', 'Covered_Recipient_Type'
+]
+
+# 过滤逻辑 (filter_chunk)
+chunk = chunk[chunk['Covered_Recipient_Type'].isin(['Covered Recipient Physician', 'Covered Recipient Non-Physician Practitioner'])]
+chunk = chunk.dropna(subset=['Covered_Recipient_NPI'])
+chunk = chunk[chunk['Covered_Recipient_Primary_Type_1'].str.contains('Physician|Doctor|Osteopathy', case=False, na=False)]
+
+# GroupBy聚合逻辑 (aggregate_rfm)
+# 为每个NPI累加金额(monetary)和频次(frequency)，并记录最新日期用于后续Recency计算
+if payment_date > stats['most_recent_date']:
+    stats['most_recent_date'] = payment_date
+stats['frequency'] += 1
+stats['monetary'] += amount
+
+# Recency天数计算方式 (process_csv)
+REFERENCE_DATE = datetime(2025, 6, 30).date()
+recency_days = (REFERENCE_DATE - stats['most_recent_date']).days
+```
+
+注：Log1p变换和Recency反转的具体代码行位于聚类服务中：
+代码文件：`backend/app/services/analysis_service_optimized.py`
+```python
+# Recency反转
+max_recency = df_clean['recency_days'].max()
+df_clean['recency_score'] = max_recency - df_clean['recency_days']
+
+# Log1p变换
+df_clean[col_name] = np.log1p(df_clean[f])
+```
+
+4. 可直接引用进论文的中文描述语句：
+在ETL数据清洗阶段，系统针对包含1540余万条源数据的CSV文件，采用了基于Pandas的Chunk分块流式读取技术（`CHUNK_SIZE = 50000`以控制内存）。首先，系统指定了包含NPI、姓名、专科、金额及日期等12个维度的降维字段列表（`CORE_FIELDS`），并严格过滤掉了机构类型，仅保留包含“Physician”等字样的个体执业医师记录。随后，在核心的内存聚合（`aggregate_rfm`）环节中，系统以NPI作为主键，累加该受众的所有合规流水记录来计算`Frequency`（总次数）与`Monetary`（总美元额度），并通过提取最近一次流水交易日期，通过与给定的数据集统计基准日（设定为2025年6月30日）相减获取初始时间间隔作为`Recency`原始天数记录。最终，将高达千万条原始流水成功精简聚合落库成738,773条医生结构化RFM画像实体。为了使得业务逻辑同向化，在发起K-Means聚类前，利用`max(recency_days) - recency_days`机制执行了对时间维度的语义强制反转计算，并使用`numpy.log1p()`在高离散值的金额与频次轴实现了极端长尾效应的对数压扁。
