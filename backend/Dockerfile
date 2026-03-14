@@ -4,8 +4,12 @@ FROM python:3.9-slim
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖 (如果需要)
-# RUN apt-get update && apt-get install -y gcc
+# 安装系统依赖 (gcc 等用于编译 C 扩展)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    build-essential \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
 COPY requirements.txt .

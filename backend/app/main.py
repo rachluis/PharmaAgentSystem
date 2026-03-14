@@ -5,10 +5,17 @@ FastAPI Main Application Entry Point.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from .database import engine, Base
 from .config import get_settings
 from . import models  # Import models to ensure tables are created
+from .core.exception_handlers import (
+    validation_exception_handler,
+    sqlalchemy_exception_handler,
+    general_exception_handler
+)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -21,6 +28,11 @@ app = FastAPI(
     version="0.1.0",
     debug=settings.debug
 )
+
+# Register exception handlers
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(SQLAlchemyError, sqlalchemy_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
 
 # CORS configuration for frontend
 app.add_middleware(
@@ -65,10 +77,11 @@ async def health_check():
     }
 
 
-from .routers import analysis_tasks, auth, doctors, reports, system
+from .routers import analysis_tasks, auth, doctors, reports, system, users
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(doctors.router, prefix="/api/v1/doctors", tags=["doctors"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(analysis_tasks.router, prefix="/api/v1/analysis/tasks", tags=["analysis-tasks"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["system"])
+app.include_router(users.router, prefix="/api/v1/users", tags=["users"])

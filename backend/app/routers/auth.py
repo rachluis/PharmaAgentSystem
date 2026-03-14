@@ -218,23 +218,29 @@ async def update_profile(
     return current_user
 
 
+class PasswordChange(BaseModel):
+    old_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=6, max_length=72)
+
+
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password(
-    old_password: str,
-    new_password: str,
+    password_data: PasswordChange,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Change user password."""
-    if not verify_password(old_password, current_user.password_hash):
+    if not verify_password(password_data.old_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect old password"
         )
-    
-    current_user.password_hash = get_password_hash(new_password)
+
+    # Ensure new password doesn't exceed bcrypt limit
+    new_password_hash = get_password_hash(password_data.new_password[:72])
+    current_user.password_hash = new_password_hash
     db.commit()
-    
+
     return {"code": 200, "message": "Password changed successfully"}
 
 
@@ -251,6 +257,7 @@ import os
 import uuid
 
 UPLOAD_DIR = "uploads/avatars"
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 @router.post("/upload-avatar", response_model=UserResponse)
 async def upload_avatar(
@@ -259,22 +266,39 @@ async def upload_avatar(
     db: Session = Depends(get_db)
 ):
     """Upload user avatar."""
-    # 1. Validate file
+    # 1. Validate file type
     if not file.content_type.startswith("image/"):
         raise HTTPException(
             status_code=400,
             detail="File must be an image"
         )
-    
-    # 2. Check size (content-length header is not always reliable, but good first check)
-    # Actual read check happens during save if needed.
-    
-    # 3. Generate filename
-    file_ext = os.path.splitext(file.filename)[1]
+
+    # 2. Ensure upload directory exists
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    # 3. Validate file size
+    file.file.seek(0, 2)  # Seek to end
+    file_size = file.file.tell()
+    file.file.seek(0)  # Reset to beginning
+
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File size exceeds maximum allowed size of {MAX_FILE_SIZE / (1024*1024)}MB"
+        )
+
+    # 4. Generate secure filename
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file extension. Allowed: jpg, jpeg, png, gif, webp"
+        )
+
     filename = f"{current_user.id}_{uuid.uuid4()}{file_ext}"
     file_path = os.path.join(UPLOAD_DIR, filename)
-    
-    # 4. Save file
+
+    # 5. Save file
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -283,12 +307,11 @@ async def upload_avatar(
             status_code=500,
             detail=f"Could not save file: {str(e)}"
         )
-        
-    # 5. Update user profile
-    # URL should be relative path that frontend can access via static mount
+
+    # 6. Update user profile
     avatar_url = f"/uploads/avatars/{filename}"
     current_user.avatar_url = avatar_url
     db.commit()
     db.refresh(current_user)
-    
+
     return current_user

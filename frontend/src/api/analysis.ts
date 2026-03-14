@@ -30,7 +30,7 @@ export interface GenerateStrategyRequest {
 }
 
 const getClusterResults = () => {
-  return request.get<any, ClusterResult[]>('/analysis/tasks/results/list')
+  return request.get<any, ClusterResult[]>('/analysis/tasks/results')
 }
 
 const createTask = (data: { task_name: string; task_type: string; parameters: any }) => {

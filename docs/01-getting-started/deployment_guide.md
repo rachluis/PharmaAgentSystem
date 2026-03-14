@@ -82,3 +82,47 @@ docker-compose up -d --build
     ```
 
     (按 `Ctrl+C` 退出日志查看)
+
+## 5. 常见问题与故障排除 (Troubleshooting)
+
+### 1. 端口冲突 (Port 80 is already allocated)
+
+**现象**：启动时报错 `Bind for 0.0.0.0:80 failed: port is already allocated`。
+**原因**：Windows 的 System 进程、IIS 或 Skype 占用了 80 端口。
+**解决**：
+我们已将默认配置修改为 **8080** 端口。如果仍有冲突，请修改 `docker-compose.yml`：
+
+```yaml
+frontend:
+  ports:
+    - "8081:80"  # 改为 8081 或其他空闲端口
+```
+
+### 2. 后端构建失败 (gcc / zlib 错误)
+
+**现象**：`fatal error: zlib.h: No such file or directory` 或 `command 'gcc' failed`。
+**原因**：Python 依赖库 `pyreadstat` 需要编译 C 扩展，需要系统安装 `gcc` 和 `zlib` 开发库。
+**解决**：
+确保 `backend/Dockerfile` 包含以下安装命令（已修复）：
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc build-essential zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+### 3. 前端构建失败 (Vite requires Node.js 20+)
+
+**现象**：`crypto.hash is not a function` 或 `Vite requires Node.js version 20+`。
+**原因**：新版 Vite 对 Node.js 版本有更高要求。
+**解决**：
+确保 `frontend/Dockerfile` 使用 `node:22-alpine` 或更高版本：
+
+```dockerfile
+FROM node:22-alpine as build-stage
+```
+
+### 4. 外网访问
+
+**需求**：希望其他人也能访问系统。
+**解决**：请参考项目文档 `docs/public_access_guide.md`，推荐使用 **cpolar** 进行内网穿透。

@@ -1,0 +1,64 @@
+{
+  "result_id": 3,
+  "cluster_labels_map": {
+    "0": "Low-Engagement",
+    "1": "High-Value Core (VIP)",
+    "2": "Low-Engagement",
+    "3": "Regular Customers",
+    "4": "Low-Engagement"
+  },
+  "summary_stats": {
+    "0": {
+      "count": 183813,
+      "percentage": 24.88,
+      "means": {
+        "recency_days": 258.52797136219965,
+        "frequency": 1.8728218352347223,
+        "monetary": 64.58968429871663
+      }
+    },
+    "1": {
+      "count": 149603,
+      "percentage": 20.25,
+      "means": {
+        "recency_days": 202.72430365701223,
+        "frequency": 59.42043274533265,
+        "monetary": 15466.265747277796
+      }
+    },
+    "2": {
+      "count": 113140,
+      "percentage": 15.31,
+      "means": {
+        "recency_days": 455.5369365388015,
+        "frequency": 1.2246331978080254,
+        "monetary": 45.15916413293265
+      }
+    },
+    "3": {
+      "count": 213635,
+      "percentage": 28.92,
+      "means": {
+        "recency_days": 225.6722072694081,
+        "frequency": 9.562346993704216,
+        "monetary": 530.5349428230393
+      }
+    },
+    "4": {
+      "count": 78581,
+      "percentage": 10.64,
+      "means": {
+        "recency_days": 376.37299092655985,
+        "frequency": 3.4214759292958856,
+        "monetary": 653.9711124826613
+      }
+    }
+  },
+  "metrics": {
+    "inertia": 437357.64740637626,
+    "silhouette": 0.3656123916519033,
+    "davies_bouldin": 0.9440790952656849,
+    "calinski_harabasz": 744906.2105642764
+  },
+  "timestamp": "2026-01-26T16:12:53.231643"
+}

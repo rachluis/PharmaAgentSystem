@@ -54,14 +54,19 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             token = request.headers.get("Authorization")
             if token and token.startswith("Bearer "):
                 # Decode token (simplified, avoiding full dependency injection complexity here)
-                from jose import jwt
+                from jose import jwt, JWTError
                 from app.core.security import SECRET_KEY, ALGORITHM
                 try:
                     token_str = token.split(" ")[1]
                     payload = jwt.decode(token_str, SECRET_KEY, algorithms=[ALGORITHM])
                     username = payload.get("sub", "anonymous")
-                except:
-                    pass
+                except JWTError:
+                    # Invalid or expired token - keep as anonymous
+                    username = "anonymous"
+                except Exception as e:
+                    # Unexpected error during token decode
+                    print(f"Token decode error in logging middleware: {e}")
+                    username = "anonymous"
             
             # Determine module
             module = "unknown"
