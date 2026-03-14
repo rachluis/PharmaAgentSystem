@@ -53,3 +53,23 @@ npm run dev
 - **市场分析**: K-Means 聚类分析，识别核心客户群体。
 - **系统日志**: 全面的登录与操作日志监控 (`/system/logs`)。
 - **个人中心**: 支持头像上传及个人信息管理。
+
+## 📚 文档中心
+
+为保持根目录清爽，所有详细方案、实测数据报告以及毕业论文全稿均已归档至 [docs 目录](./docs/README.md)：
+
+### 系统开发文档
+
+- [快速开始](./docs/01-getting-started/quick_start.md)
+- [系统架构分析](./docs/02-architecture/system_architecture_and_workflow.md)
+- [开发实战指南](./docs/03-development/developer_guide_analysis.md)
+- [数据字典与结构](./docs/04-data/DATA_DICTIONARY.md)
+
+### 学术与实研补充文档 (🌟 New)
+
+- **实测数据提取:** [docs/08-ai-extractions](./docs/08-ai-extractions/) (含聚类最优K值、数据库SQL探针耗时、AI报告原件等证明材料)
+- **学术原稿与大纲:** [docs/09-academic](./docs/09-academic/) (含最新的第五、六章修订版，以及论文初稿与提示词)
+
+---
+
+> **Note:** 系统中临时测试脚本均已收纳至 `backend/scripts/archive`，以保持核心微服务的纯洁性。

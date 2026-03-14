@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 
 // Views
 import Login from '@/views/Login.vue'
@@ -75,14 +76,34 @@ const router = createRouter({
 })
 
 // Navigation guard
-router.beforeEach((to, _from, next) => {
-  const token = localStorage.getItem('token')
+router.beforeEach(async (to, from, next) => {
+  const userStore = useUserStore()
   
-  if (to.meta.requiresAuth && !token) {
-    next('/login')
-  } else if (to.path === '/login' && token) {
-    next('/dashboard')
-  } else {
+  // 初始化用户状态
+  if (!userStore.user && userStore.token) {
+    try {
+      await userStore.fetchUserInfo()
+    } catch {
+      userStore.clearUser()
+    }
+  }
+  
+  // 需要认证的路由
+  if (to.meta.requiresAuth) {
+    if (!userStore.isAuthenticated) {
+      next({
+        path: '/login',
+        query: { redirect: to.fullPath }
+      })
+    } else {
+      next()
+    }
+  } 
+  // 已登录用户访问登录页，重定向到首页
+  else if (to.path === '/login' && userStore.isAuthenticated) {
+    next(from.fullPath || '/dashboard')
+  } 
+  else {
     next()
   }
 })

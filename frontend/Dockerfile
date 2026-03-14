@@ -1,11 +1,11 @@
 # 阶段 1: 构建阶段
-FROM node:18-alpine as build-stage
+FROM node:22-alpine as build-stage
 
 WORKDIR /app
 
 # 复制 package.json 并安装依赖
 COPY package*.json ./
-RUN npm install --registry=https://registry.npmmirror.com
+RUN npm install --registry=https://registry.npmmirror.com --legacy-peer-deps
 
 # 复制源代码并构建
 COPY . .

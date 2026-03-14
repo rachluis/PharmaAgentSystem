@@ -11,7 +11,7 @@
           <el-input 
             v-model="loginFilter.username" 
             placeholder="搜索用户名" 
-            prefix-icon="Search"
+            :prefix-icon="Search"
             style="width: 200px"
             clearable
             @clear="fetchLoginLogs"
@@ -64,7 +64,7 @@
           <el-input 
             v-model="opFilter.username" 
             placeholder="操作人" 
-            prefix-icon="Search"
+            :prefix-icon="Search"
             style="width: 150px"
             clearable
             @keyup.enter="fetchOpLogs"

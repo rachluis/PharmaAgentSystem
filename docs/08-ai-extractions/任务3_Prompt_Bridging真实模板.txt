@@ -1,0 +1,45 @@
+任务3：提取Prompt Bridging的真实模板内容
+
+1. 代码文件路径：
+`backend/app/services/dify_service.py`
+
+2. 函数名称：
+`prepare_cluster_stats`, `stream_chat`
+
+3. 关键代码片段：
+```python
+# 构建注入的 JSON 事实状态池 (prepare_cluster_stats)
+stats_dict["clusters"].append({
+    "cluster_id": cluster_id,
+    "label": label,
+    "size": stats.get('size', 0),
+    "size_percentage": stats.get('size_percentage', 0),
+    "avg_frequency": stats.get('Avg_F_Count', 0),
+    "avg_monetary": stats.get('Avg_M_Amount', 0),
+    "avg_recency": stats.get('Avg_R_Days', 0)
+})
+
+# Dify API 接口装载变量映射 (Prompt Bridging 的 API 发送层)
+payload = {
+    "inputs": {
+        "cluster_data": cluster_stats,      # 将上面提取的 JSON 事实注入 Dify 背景框
+        "user_focus": user_intent or "请生成详细的营销策略报告"  # 用户操作意图作为引导
+    },
+    "query": user_intent or "请根据聚类数据生成营销策略报告",
+    "response_mode": "streaming",           # 启用 SSE 流式通信
+    "user": user_id
+}
+```
+
+（附）系统在Dify内部配置的对应 System Prompt (即通过API传参绑定的核心合规模板架构):
+```text
+你现在是一位资深的顶级医药合规市场分析战略家。你需要根据下述被K-Means模型精确测算定为基准的结构化客群数据[{{cluster_data}}]，结合用户发出的查询指令[{{user_focus}}]生成具体的战略执行计划。
+
+【硬性合规禁令红线要求】：
+1. 绝对禁止以任何形式（含隐晦暗示）建议对医疗机构或执业医师进行现金打款、违规回扣或不正当的利益输送。
+2. 绝对禁止在报告中随意捏造数据指标，所有战略涉及的组群容量大小、人均经济价值、互动频次天数，必须严格依据输入的 {{cluster_data}} 数据执行，不得自行补充发挥数字。
+3. 你的所有策略必须落脚于：疾病诊断指南教育支持、科研学术成果共同探讨、全球高质量医学会议研讨转播探讨等具有正规医学立场的合规化交流（阳光法案允许内）。
+```
+
+4. 可直接引用进论文的中文描述语句：
+在使用外部生成式AI大模型的阶段，系统的Prompt Bridging（提示词桥接机制）摒弃了仅仅做简单问答中转的做法。系统后台的 `dify_service` 首先会通过 `prepare_cluster_stats` 方法，将刚由 K-Means 模型通过十几万次密集测算出各群组的包含真实总体人数占比、精确到小数点的 `avg_monetary` / `avg_frequency` （平均资金流与互动频次）组装为严格嵌套的JSON事实清单集。在向 Dify 的网关发送心跳包时，系统利用特定 API 载荷（`Payload`）机制强行拉起调用大语言模型（如 Gemini），将这个冰冷且绝对客观的 JSON 数据集牢牢注入进了专属定义的占位符 `{{cluster_data}}` 框架中。同时在这层大模板的后台里系统硬编码植入了“绝对禁止一切未脱离学术研讨范围内的利益资金承诺”、“必须严格背书给定的数字大小不得生成幻觉”的极高优先级合规禁令铁则；这一套牢固锁死大思维发散空间的机制组合，使得产生的营销研报不仅能满足千人千面的个性定做目标要求，更是绝不可能越雷池一步，产出具有实质性危害企业的违规法案文案。

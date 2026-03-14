@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   # 后端服务
@@ -23,8 +23,7 @@ services:
       dockerfile: Dockerfile
     container_name: pharma-frontend
     ports:
-      - "80:80"
+      - "8080:80"
     depends_on:
       - backend
     restart: always
-

@@ -31,49 +31,123 @@ class DifyService:
             "Content-Type": "application/json"
         }
     
-    def prepare_cluster_stats(self, cluster_result: ClusterResult) -> str:
+    def prepare_cluster_stats(self, cluster_result: ClusterResult, db=None) -> str:
         """
         Prepare cluster statistics as JSON string for Dify input.
-        
+
+        Handles two kpi_summary formats:
+          - Structure A (flat/old): {"avg_frequency": X, "avg_monetary": Y, ...}
+          - Structure B (nested/new): {"0": {"count":N, "means": {...}}, "1": {...}, ..., "metrics": {...}}
+
         Args:
             cluster_result: ClusterResult database model
-            
+            db: Optional SQLAlchemy Session for live fallback aggregation
+
         Returns:
             JSON string containing cluster statistics
         """
+        # Non-group keys to skip when iterating Structure B
+        NON_GROUP_KEYS = {"metrics", "clustering_time_seconds", "data_size", "optimizations_applied"}
+
         try:
-            kpi_summary = json.loads(cluster_result.kpi_summary) if cluster_result.kpi_summary else {}
-            cluster_labels = json.loads(cluster_result.cluster_labels) if cluster_result.cluster_labels else {}
-            
-            # Calculate K from cluster_labels or kpi_summary
-            k_value = len(kpi_summary) if kpi_summary else len(cluster_labels)
-            
+            raw_kpi = cluster_result.kpi_summary
+            # kpi_summary may be stored as a JSON string inside a JSON string (double-encoded)
+            kpi_summary = json.loads(raw_kpi) if isinstance(raw_kpi, str) else (raw_kpi or {})
+            if isinstance(kpi_summary, str):
+                kpi_summary = json.loads(kpi_summary)
+
+            cluster_labels = cluster_result.cluster_labels
+            if isinstance(cluster_labels, str):
+                cluster_labels = json.loads(cluster_labels) if cluster_labels else {}
+            cluster_labels = cluster_labels or {}
+
             stats_dict = {
                 "cluster_id": cluster_result.cluster_id,
                 "cluster_name": cluster_result.cluster_name or f"Cluster {cluster_result.cluster_id}",
-                "k_value": k_value,
                 "algorithm": cluster_result.algorithm or "k-means",
                 "silhouette_score": float(cluster_result.silhouette_score) if cluster_result.silhouette_score else None,
                 "inertia": float(cluster_result.inertia) if cluster_result.inertia else None,
                 "clusters": []
             }
-            
-            # Add individual cluster details
-            for cluster_id, stats in kpi_summary.items():
-                label = cluster_labels.get(str(cluster_id), f"Cluster {cluster_id}")
-                cluster_info = {
-                    "cluster_id": cluster_id,
-                    "label": label,
-                    "size": stats.get('size', 0),
-                    "size_percentage": stats.get('size_percentage', 0),
-                    "avg_frequency": stats.get('Avg_F_Count', stats.get('avg_frequency', 0)),
-                    "avg_monetary": stats.get('Avg_M_Amount', stats.get('avg_monetary', 0)),
-                    "avg_recency": stats.get('Avg_R_Days', stats.get('avg_recency', 0))
-                }
-                stats_dict["clusters"].append(cluster_info)
-            
+
+            # ── Detect structure type ──────────────────────────────────────────
+            # Structure B: top-level keys contain digit strings like "0", "1", ...
+            is_structure_b = any(
+                k not in NON_GROUP_KEYS and k.isdigit()
+                for k in kpi_summary.keys()
+            )
+
+            if is_structure_b:
+                # Structure B: nested per-group dict with "means" sub-dict
+                for group_key, stats in kpi_summary.items():
+                    if group_key in NON_GROUP_KEYS or not group_key.isdigit():
+                        continue  # skip metadata keys
+
+                    if not isinstance(stats, dict):
+                        continue
+
+                    means = stats.get("means", {})
+                    label = cluster_labels.get(str(group_key), f"Cluster {group_key}")
+
+                    stats_dict["clusters"].append({
+                        "cluster_id": group_key,
+                        "label": label,
+                        "size": stats.get("count", 0),
+                        "size_percentage": stats.get("percentage", 0),
+                        "avg_frequency": means.get("frequency", 0),
+                        "avg_monetary": means.get("monetary", 0),
+                        "avg_recency": means.get("recency_days", 0),
+                    })
+
+            else:
+                # Structure A: old flat format — fall back to live DB aggregation
+                if db is not None:
+                    from sqlalchemy import func, text
+                    from ..models import Doctor
+                    rows = (
+                        db.query(
+                            Doctor.cluster_id,
+                            Doctor.cluster_label,
+                            func.count().label("count"),
+                            func.avg(Doctor.monetary).label("avg_monetary"),
+                            func.avg(Doctor.frequency).label("avg_frequency"),
+                            func.avg(Doctor.recency_days).label("avg_recency"),
+                        )
+                        .filter(Doctor.cluster_id == cluster_result.cluster_id)
+                        .group_by(Doctor.cluster_id, Doctor.cluster_label)
+                        .all()
+                    )
+                    for row in rows:
+                        stats_dict["clusters"].append({
+                            "cluster_id": str(cluster_result.cluster_id),
+                            "label": row.cluster_label or cluster_result.cluster_name or f"Cluster {cluster_result.cluster_id}",
+                            "size": row.count,
+                            "size_percentage": 0,
+                            "avg_frequency": round(row.avg_frequency or 0, 2),
+                            "avg_monetary": round(row.avg_monetary or 0, 2),
+                            "avg_recency": round(row.avg_recency or 0, 2),
+                        })
+                else:
+                    # No DB — use flat kpi_summary fields directly as single-cluster entry
+                    stats_dict["clusters"].append({
+                        "cluster_id": str(cluster_result.cluster_id),
+                        "label": cluster_result.cluster_name or f"Cluster {cluster_result.cluster_id}",
+                        "size": kpi_summary.get("size", 0),
+                        "size_percentage": kpi_summary.get("size_percentage", 0),
+                        "avg_frequency": kpi_summary.get("avg_frequency", 0),
+                        "avg_monetary": kpi_summary.get("avg_monetary", 0),
+                        "avg_recency": kpi_summary.get("avg_recency_days", kpi_summary.get("avg_recency", 0)),
+                    })
+
+            stats_dict["k_value"] = len(stats_dict["clusters"])
+
+            logger.info(
+                f"Prepared stats for {len(stats_dict['clusters'])} clusters, "
+                f"first cluster size: {stats_dict['clusters'][0]['size'] if stats_dict['clusters'] else 0}"
+            )
+
             return json.dumps(stats_dict, ensure_ascii=False)
-            
+
         except Exception as e:
             logger.error(f"Error preparing cluster stats: {e}")
             return json.dumps({"error": "Failed to prepare cluster statistics"}, ensure_ascii=False)

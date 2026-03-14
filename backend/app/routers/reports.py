@@ -88,7 +88,7 @@ async def generate_strategy_stream(
         raise HTTPException(status_code=404, detail="Cluster not found")
     
     # Prepare cluster statistics as JSON string
-    cluster_stats_json = dify_service.prepare_cluster_stats(cluster)
+    cluster_stats_json = dify_service.prepare_cluster_stats(cluster, db=db)
     
     async def event_generator():
         start_time = time.time()
@@ -143,7 +143,7 @@ async def generate_report_sync(
     if request.related_cluster_id:
         cluster = db.query(ClusterResult).filter(ClusterResult.cluster_id == request.related_cluster_id).first()
         if cluster:
-            cluster_stats_json = dify_service.prepare_cluster_stats(cluster)
+            cluster_stats_json = dify_service.prepare_cluster_stats(cluster, db=db)
     
     # Generate content (collect all chunks)
     content_parts = []
